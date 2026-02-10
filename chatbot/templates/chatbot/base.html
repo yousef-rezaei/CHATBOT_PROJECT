@@ -1,0 +1,38 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NORMAN SLE Chatbot{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'css/chatbot.css' %}">
+    <!-- <link rel="stylesheet" href="{% static 'css/hexagon_button.css' %}"> -->
+    {% block extra_css %}{% endblock %}
+    <style>
+.chatbot-button {
+    width: 70px !important;
+    height: 62px !important;
+}
+.chatbot-button svg,
+#chatIcon,
+#closeIcon {
+    width: 28px !important;
+    height: 28px !important;
+}
+</style>
+</head>
+<body>
+    {% block content %}{% endblock %}
+    
+    {% include 'chatbot/includes/chatbot_widget.html' %}
+    
+    <script>
+        window.CHATBOT_CONFIG = {
+            apiEndpoint: '{% url "chatbot:chatbot_api" %}',
+            csrfToken: '{{ csrf_token }}',
+        };
+    </script>
+    <script src="{% static 'js/chatbot.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
