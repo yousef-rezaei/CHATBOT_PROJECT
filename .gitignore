@@ -29,7 +29,7 @@ __pycache__/
 db.sqlite3
 
 # Static files
-/static/
+
 /collected_static/
 /staticfiles/
 
