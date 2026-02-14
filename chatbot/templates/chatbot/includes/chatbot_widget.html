@@ -1,11 +1,11 @@
 {% load static %}
-<!-- NORMAN SLE Chatbot Widget - CATEGORY NAVIGATION SYSTEM -->
+<!-- Chatbot Widget - FULLY DYNAMIC with Icons from CSV -->
 
 <!-- Link to External CSS -->
 <link rel="stylesheet" href="{% static 'css/chatbot.css' %}">
 
 <!-- Chatbot Toggle Button -->
-<button class="chatbot-button" id="chatbotToggle" aria-label="Toggle NORMAN SLE Assistant">
+<button class="chatbot-button" id="chatbotToggle" aria-label="Toggle FAQ Assistant">
     <!-- Menu Icon (3 lines) -->
     <svg id="chatIcon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="white">
         <rect x="5" y="6" width="14" height="2" rx="1"/>
@@ -30,7 +30,7 @@
                 </svg>
             </div>
             <div class="chatbot-header-text">
-                <h3>NORMAN SLE Assistant</h3>
+                <h3>FAQ Assistant</h3>
                 <p>
                     <span class="status-indicator"></span>
                     Ready to help
@@ -44,10 +44,10 @@
     <div class="chatbot-messages" id="chatbotMessages">
         <!-- Initial Bot Message -->
         <div class="message bot">
-            <div class="message-avatar">NS</div>
+            <div class="message-avatar">AI</div>
             <div class="message-content">
                 <div class="message-bubble">
-                    Hi! 👋 I'm the NORMAN SLE Assistant. Choose a category below or ask me anything.
+                    Hi! 👋 I'm your FAQ Assistant. Choose a category below or ask me anything.
                 </div>
                 <div class="message-time">Just now</div>
             </div>
@@ -55,7 +55,7 @@
 
         <!-- Typing Indicator -->
         <div class="message bot">
-            <div class="message-avatar">NS</div>
+            <div class="message-avatar">AI</div>
             <div class="typing-indicator" id="typingIndicator">
                 <span></span>
                 <span></span>
@@ -74,35 +74,9 @@
             Back to Categories
         </button>
         
-        <!-- Categories View (shown by default) -->
+        <!-- Categories View - DYNAMICALLY GENERATED FROM BACKEND -->
         <div class="quick-actions categories-scroll" id="categoriesView">
-            <button class="quick-action-btn category-btn" data-category="Getting started">
-                📖 Getting Started
-            </button>
-            <button class="quick-action-btn category-btn" data-category="Using the website">
-                🖥️ Using Website
-            </button>
-            <button class="quick-action-btn category-btn" data-category="Data & identifiers">
-                🔍 Data & IDs
-            </button>
-            <button class="quick-action-btn category-btn" data-category="Versioning & citation">
-                📝 Citation
-            </button>
-            <button class="quick-action-btn category-btn" data-category="Integrations">
-                🔗 Integrations
-            </button>
-            <button class="quick-action-btn category-btn" data-category="Contributing lists">
-                ➕ Contributing
-            </button>
-            <button class="quick-action-btn category-btn" data-category="FAIR & licensing">
-                ⚖️ FAIR
-            </button>
-            <button class="quick-action-btn category-btn" data-category="Troubleshooting">
-                🔧 Help
-            </button>
-            <button class="quick-action-btn category-btn" data-category="About the project">
-                ℹ️ About
-            </button>
+            <!-- Categories loaded from backend via API -->
         </div>
         
         <!-- Questions View (hidden by default) -->
@@ -116,7 +90,7 @@
         <textarea 
             class="chatbot-input" 
             id="chatbotInput" 
-            placeholder="Ask about suspect lists..." 
+            placeholder="Ask me anything..." 
             rows="1"
             aria-label="Message input"
         ></textarea>
@@ -158,10 +132,19 @@
     flex-shrink: 0;
 }
 
-/* Category buttons with emojis */
+/* Category buttons with icons from CSV */
 .category-btn {
-    font-size: 12px !important;
-    padding: 8px 12px !important;
+    font-size: 13px !important;
+    padding: 8px 14px !important;
+    font-weight: 500 !important;
+}
+
+/* Icon styling for black & white look */
+.category-btn .category-icon {
+    font-size: 14px;
+    margin-right: 6px;
+    color: #2d3e2d;
+    font-weight: bold;
 }
 
 /* Question buttons */
@@ -183,85 +166,78 @@
 }
 </style>
 
-<!-- FAQ Data from CSV -->
-<script id="faqData" type="application/json">
-{
-    "Getting started": [
-        {"q": "What is NORMAN-SLE?", "a": "NORMAN-SLE is an open, community-driven platform that collects and publishes suspect lists (predefined lists of chemicals expected or suspected to occur in a given matrix) to support high-resolution mass spectrometry (HRMS) suspect screening. The lists are made publicly accessible together with references and key identifiers to enable efficient screening and reuse across studies and tools."},
-        {"q": "Why use it?", "a": "NORMAN-SLE helps researchers 'screen smart' by offering many curated suspect lists with consistent identifiers and references, so you can choose lists relevant to your study and apply them directly in LC/GC-MS workflows. Lists are versioned and citable via DOIs, and interoperability is improved through integration with major databases (e.g., PubChem and CompTox)."},
-        {"q": "What is the scope?", "a": "NORMAN-SLE focuses on suspect lists relevant to environmental science and monitoring, especially organic contaminants amenable to liquid or gas chromatography coupled to mass spectrometry. The collections span many domains (e.g., PFAS, transformation products, pharmaceuticals, pesticides, food-contact chemicals, endocrine disruptors, ionic liquids, UVCBs and more)."},
-        {"q": "What is a suspect list?", "a": "A suspect list is a predefined list of chemicals of interest or suspected to occur in a specific matrix. In HRMS workflows, suspect lists enable faster and more focused screening than untargeted approaches by allowing you to search for expected masses and identifiers. They can also be used to prepare inclusion lists in advance of analysis."},
-        {"q": "SLE vs SusDat?", "a": "NORMAN-SLE provides access to individual suspect lists with references and identifiers. NORMAN SusDat is a merged and curated data table that combines SLE contributions and adds additional parameters to support broader NORMAN activities and large-scale screening."}
-    ],
-    "Using the website": [
-        {"q": "How do I find a list?", "a": "On the NORMAN-SLE website, suspect lists are presented in a table that typically includes the list number (S-code), abbreviation, description, links to the full list file, links to the InChIKey file (when available), and references. Use the description and references to choose the list most relevant to your project."},
-        {"q": "What do the columns mean?", "a": "The table columns are designed to help you quickly understand and download each list: • Number: the sequential S-number assigned to the list (e.g., S100). • Abbreviation: a short code to identify the list. • Description: what the list contains. • Link to full list: download the main dataset (often CSV/XLSX). • Link to InChIKey list: download an InChIKey-only file (if structures are defined). • References: publications or sources that describe the list."},
-        {"q": "What formats are available?", "a": "NORMAN-SLE lists are generally provided in interoperable formats such as CSV and Excel (XLSX). Many lists also provide a separate InChIKey file to support fast screening workflows. Some lists include additional files or multiple sheets to preserve extra details."},
-        {"q": "Why references matter?", "a": "References help users understand where the list came from, why it was created, and how it should be used. They also provide proper credit to contributors and allow users to trace the scientific rationale behind the list content."}
-    ],
-    "Data & identifiers": [
-        {"q": "Which identifiers are used?", "a": "Suspect lists commonly include at least one chemical name and structural identifiers such as SMILES and InChI (including InChIKey). Database identifiers may include CAS numbers, PubChem CIDs, ChemSpider IDs, and/or DSSTox identifiers (DTXSID) used by CompTox. Many lists also include molecular formula and (neutral) monoisotopic mass to support screening."},
-        {"q": "Why an InChIKey-only file?", "a": "A dedicated InChIKey-only file enables very fast screening in many workflows and tools. For example, it can be used to quickly prefilter suspects in some in silico fragmentation tools and pipelines, and it supports deep indexing and lookups by a compact identifier."},
-        {"q": "Do all entries have structures?", "a": "Not all lists contain complete structural information. Some lists are formula-based or contain partially characterized substances (e.g., isomeric mixtures, surfactants, or certain PFAS from patents). In such cases, InChI or InChIKey may not exist."},
-        {"q": "What info in list entry?", "a": "A suspect list entry can include: chemical name and synonyms; structural identifiers (SMILES, InChI, InChIKey); database IDs (CAS, DTXSID, PubChem CID, etc.); and screening-relevant fields like molecular formula and neutral monoisotopic mass. Some lists add context-specific annotations."}
-    ],
-    "Versioning & citation": [
-        {"q": "How do I cite a list?", "a": "Each suspect list is archived as a Zenodo record with a DOI, enabling formal citation. If you used a specific version, cite that version's DOI for reproducibility. You can also cite the 'concept DOI' (the master DOI) that redirects to the latest version."},
-        {"q": "How does versioning work?", "a": "NORMAN-SLE uses Zenodo's versioning to track changes. A common pattern is NORMAN-SLE-SXX-0.Y.Z (SXX = list number). Major updates (increase Y) typically add new entries or substantial content; minor updates (increase Z) fix or adjust existing content."},
-        {"q": "Which version should I use?", "a": "For most analyses, use the latest version to benefit from corrections and improvements. For reproducibility, record the exact version downloaded (including the Zenodo version and DOI) and cite it in your work."}
-    ],
-    "Integrations": [
-        {"q": "How is SLE in PubChem?", "a": "NORMAN-SLE content is integrated into PubChem through substance depositions compiled from list files (often linked from Zenodo via mapping files). PubChem assigns Substance IDs (SIDs) to deposited entries and generates Compound IDs (CIDs) for defined structures after standardization."},
-        {"q": "SID vs CID?", "a": "In PubChem, a Substance ID (SID) represents a deposited substance record, which can include entries without fully defined structures. A Compound ID (CID) represents a unique, standardized chemical structure extracted from depositions."},
-        {"q": "How is SLE in CompTox?", "a": "NORMAN-SLE lists are integrated into CompTox through the 'Chemical Lists' functionality by uploading DTXSIDs linked to each list. Because CompTox updates are less frequent and some SLE substances may not have DTXSIDs, the CompTox versions can be incomplete and may lag behind the latest SLE/Zenodo versions."},
-        {"q": "Why versions differ?", "a": "Different platforms have different update cycles (PubChem can update quickly; CompTox is less frequent), so versions can diverge. For reproducibility, rely on the Zenodo DOI/version you used."},
-        {"q": "Can I access programmatically?", "a": "NORMAN-SLE list files are downloadable (CSV/XLSX) for use in scripts and pipelines. In addition, downstream resources such as PubChem's Classification Browser can be accessed programmatically, which can help automate retrieval and analysis of list content."}
-    ],
-    "Contributing lists": [
-        {"q": "How can I submit a list?", "a": "NORMAN-SLE welcomes new list submissions. Submissions are typically made by sending the list (often CSV/XLSX) to the NORMAN-SLE contact points. Provide clear references, a description, and as many reliable chemical identifiers as possible to support curation."},
-        {"q": "What should I include?", "a": "At minimum, include at least one chemical name and, where possible, structural identifiers (SMILES and InChI/InChIKey). If available, also include database identifiers (CAS RN, PubChem CID, DSSTox/DTXSID, etc.), molecular formula, and neutral monoisotopic mass. Provide references and context."},
-        {"q": "What happens after submission?", "a": "After submission, the list is processed depending on its size and content. NORMAN-SLE assigns a sequential S-number and an abbreviation following conventions. Where possible, missing values are filled using curation workflows, then the list is published on the website and archived on Zenodo with a DOI."},
-        {"q": "How strict is curation?", "a": "NORMAN-SLE performs curation to improve identifiers and fill missing values where feasible, but it generally aims to represent submissions as provided. Extensive curation comparable to large national/agency databases may not always be possible. Versioning on Zenodo helps track improvements over time."},
-        {"q": "Can I send feedback?", "a": "Yes—NORMAN-SLE welcomes new submissions and feedback, including suggestions for improvements, corrections, and ideas for new features or workflows. Use the contact information on the NORMAN-SLE website to reach the maintainers."}
-    ],
-    "FAIR & licensing": [
-        {"q": "How is SLE FAIR?", "a": "NORMAN-SLE supports FAIRness by using dataset DOIs and InChIKeys for findability, providing open downloads (often through Zenodo) for accessibility, using interoperable chemical identifiers (SMILES/InChI) for integration, and enabling reuse through open licensing and community standards."},
-        {"q": "What is the license?", "a": "NORMAN-SLE lists are archived on Zenodo with clear licensing and citation information. Many lists are shared under a permissive open license such as CC-BY 4.0, allowing reuse with appropriate attribution. Always check the license on the specific list's Zenodo record."}
-    ],
-    "Troubleshooting": [
-        {"q": "No InChIKey file?", "a": "InChIKeys can only be generated for defined chemical structures. If a list contains mostly formula-only entries, mixtures, or undefined structures (e.g., certain surfactant or UVCB-related content), an InChIKey-only file may not be available."},
-        {"q": "What is MS-ready?", "a": "'MS-ready' refers to representing chemicals in a standardized form suitable for mass-spectral screening (e.g., neutral forms). This can reduce trivial screening errors such as searching exact masses of salts or polymers. NORMAN SusDat provides MS-ready content."},
-        {"q": "How are errors fixed?", "a": "If issues are found (e.g., incorrect SMILES, CAS numbers, or mismatched identifiers), they can be corrected and released as a new Zenodo version of the list (often as a minor update). Updated versions may later propagate to PubChem/CompTox depending on their update cycles."},
-        {"q": "Why missing in CompTox?", "a": "CompTox integration relies on DSSTox identifiers (DTXSIDs). If a chemical has no DTXSID, it cannot be included in the CompTox list. Additionally, CompTox updates may lag, so newly added or updated SLE lists may take weeks/months to appear."},
-        {"q": "How are mixtures handled?", "a": "Mixtures and UVCBs can be represented in suspect lists, but they often lack a single defined structure and thus cannot always be assigned InChI/InChIKeys or PubChem CIDs. Handling such content remains a known challenge in cheminformatics, and SLE often preserves the information as provided."}
-    ],
-    "About the project": [
-        {"q": "How big is SLE?", "a": "As of September/October 2025, NORMAN-SLE includes 133 lists totaling 133,573 unique compounds (numbers can change with updates)."},
-        {"q": "When did it start?", "a": "NORMAN initiated the NORMAN-SLE in 2015 to facilitate open exchange of suspect lists. Since 2019, lists have been archived on Zenodo, which enables DOIs, versioning and better integration with external resources."},
-        {"q": "What do metrics mean?", "a": "Usage metrics from Zenodo are often used to estimate impact: views reflect how often users look at list records, downloads reflect how often lists are reused in workflows, and citations reflect formal recognition in research outputs."}
-    ]
-}
-</script>
-
-<!-- Category Navigation JavaScript -->
+<!-- Category Navigation JavaScript - Icons from Backend -->
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Get FAQ data
-    const faqData = JSON.parse(document.getElementById('faqData').textContent);
-    
     // Elements
     const categoriesView = document.getElementById('categoriesView');
     const questionsView = document.getElementById('questionsView');
     const backButton = document.getElementById('backButton');
-    const categoryButtons = document.querySelectorAll('.category-btn');
     
-    // Handle category clicks
-    categoryButtons.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const category = this.dataset.category;
-            showQuestions(category);
+    // Storage for FAQ data from backend
+    let faqDataByCategory = {};
+    
+    // Load categories and FAQs from backend
+    loadCategoriesFromBackend();
+    
+    function loadCategoriesFromBackend() {
+        // Fetch categories from Django backend
+        fetch(window.CHATBOT_CONFIG.apiEndpoint + '?action=get_categories', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.categories) {
+                // Store FAQ data by category
+                faqDataByCategory = data.faq_data || {};
+                
+                // Generate category buttons
+                generateCategoryButtons(data.categories);
+            }
+        })
+        .catch(error => {
+            console.error('Error loading categories:', error);
+            // Fallback: show a generic message
+            categoriesView.innerHTML = '<p style="color: #666; padding: 10px;">Categories loading...</p>';
         });
-    });
+    }
+    
+    function generateCategoryButtons(categories) {
+        // Clear existing buttons
+        categoriesView.innerHTML = '';
+        
+        // Create button for each category
+        categories.forEach(category => {
+            const btn = document.createElement('button');
+            btn.className = 'quick-action-btn category-btn';
+            btn.dataset.category = category.name;
+            
+            // Get icon from backend (or use default)
+            const icon = category.icon || '●';
+            
+            // Create icon span
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'category-icon';
+            iconSpan.textContent = icon;
+            
+            // Create text node
+            const textNode = document.createTextNode(category.display_name || category.name);
+            
+            // Append icon and text to button
+            btn.appendChild(iconSpan);
+            btn.appendChild(textNode);
+            
+            // Add click handler
+            btn.addEventListener('click', function() {
+                showQuestions(category.name);
+            });
+            
+            categoriesView.appendChild(btn);
+        });
+    }
     
     // Handle back button
     backButton.addEventListener('click', showCategories);
@@ -272,28 +248,33 @@ document.addEventListener('DOMContentLoaded', function() {
         questionsView.style.display = 'flex';
         backButton.style.display = 'flex';
         
-        // Get questions
-        const questions = faqData[category] || [];
+        // Get questions for this category from stored data
+        const questions = faqDataByCategory[category] || [];
         
         // Clear and populate
         questionsView.innerHTML = '';
+        
+        if (questions.length === 0) {
+            questionsView.innerHTML = '<p style="color: #666; padding: 10px;">No questions found</p>';
+            return;
+        }
+        
         questions.forEach(item => {
             const btn = document.createElement('button');
             btn.className = 'quick-action-btn question-btn';
-            btn.textContent = item.q;
-            btn.dataset.message = item.q;
-            btn.dataset.answer = item.a;
+            btn.textContent = item.q || item.question;
+            btn.dataset.message = item.q || item.question;
             
             // Add click handler to send question and show answer
             btn.addEventListener('click', function() {
-                handleQuestionClick(item.q, item.a);
+                handleQuestionClick(item.q || item.question);
             });
             
             questionsView.appendChild(btn);
         });
     }
     
-    function handleQuestionClick(question, answer) {
+    function handleQuestionClick(question) {
         // Add user message to chat
         addMessage(question, 'user');
         
@@ -303,7 +284,7 @@ document.addEventListener('DOMContentLoaded', function() {
             typingIndicator.classList.add('active');
         }
         
-        // Send to backend API (same as typing)
+        // Send to backend API
         fetch(window.CHATBOT_CONFIG.apiEndpoint, {
             method: 'POST',
             headers: {
@@ -322,7 +303,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             // Add bot answer from backend
-            addMessage(data.response || data.message || answer, 'bot');
+            addMessage(data.response || data.message, 'bot');
             
             // Go back to categories after answering
             setTimeout(() => {
@@ -337,8 +318,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 typingIndicator.classList.remove('active');
             }
             
-            // Fallback to embedded answer if API fails
-            addMessage(answer, 'bot');
+            // Show error message
+            addMessage('Sorry, I encountered an error. Please try again.', 'bot');
             
             // Go back to categories
             setTimeout(() => {
@@ -356,7 +337,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const avatarDiv = document.createElement('div');
         avatarDiv.className = 'message-avatar';
-        avatarDiv.textContent = sender === 'bot' ? 'NS' : 'U';
+        avatarDiv.textContent = sender === 'bot' ? 'AI' : 'U';
         
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';

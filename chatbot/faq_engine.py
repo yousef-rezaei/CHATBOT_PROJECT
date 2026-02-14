@@ -1,9 +1,3 @@
-# chatbot/faq_engine.py
-"""
-NORMAN SLE FAQ Engine - Smart Question Answering
-Supports CSV-based FAQs with future SQL database integration
-"""
-
 import csv
 import re
 from difflib import SequenceMatcher
@@ -307,6 +301,26 @@ class FAQEngine:
         buttons.sort(key=lambda x: x['order'])
         
         return buttons[:top_n]
+    
+    def get_categories_with_questions(self):
+        """Get all categories with their questions"""
+        categories = {}
+        
+        for faq in self.faqs:
+            category = faq.get('category_lvl1', 'Other')
+            
+            if category not in categories:
+                categories[category] = []
+            
+            categories[category].append(faq)
+        
+        # Sort questions within each category
+        for category in categories:
+            categories[category].sort(
+                key=lambda x: int(x.get('sub_button_order', 999))
+            )
+        
+        return categories
 
 
 # Global FAQ engine instance
@@ -336,3 +350,4 @@ def get_faq_engine() -> Optional[FAQEngine]:
         FAQ engine or None
     """
     return faq_engine
+
