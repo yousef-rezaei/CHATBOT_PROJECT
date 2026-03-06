@@ -37,8 +37,8 @@
    ================================================================= */
 .chatbot-button {
     position: fixed;
-    bottom: 32px;
-    right: 32px;
+    bottom: 20px;
+    right: 20px;
     width: 70px;
     height: 80px;
     background: linear-gradient(135deg, #a8c5a8 0%, #7db88e 50%, #6b9e78 100%);
@@ -161,11 +161,11 @@
    ================================================================= */
 .chatbot-container {
     position: fixed;
-    bottom: 120px;
+    bottom: 100px;
     right: 32px;
-    top: 45px;
+    top: 25px;
     width: 420px;
-    max-height: calc(120vh - 200px);
+    max-height: calc(160vh - 200px);
     background: var(--bg-white);
     border-radius: 20px;
     border: 2px solid var(--border-light);
