@@ -44,7 +44,7 @@
     <div class="chatbot-messages" id="chatbotMessages">
         <!-- Initial Bot Message -->
         <div class="message bot">
-            <div class="message-avatar">AI</div>
+            <div class="message-avatar">NS</div>
             <div class="message-content">
                 <div class="message-bubble">
                     Hi! 👋 I'm your FAQ Assistant. Choose a category below or ask me anything.
@@ -53,9 +53,19 @@
             </div>
         </div>
 
+        <!-- Add after welcome message -->
+<div class="message bot">
+    <div class="message-avatar">NS</div>
+    <div class="message-content">
+        <div class="message-bubble">
+            💡 <strong>Tip:</strong> I can answer FAQ questions AND search the database!
+            <br>Try: "Find chemicals containing benzene" or "How many PFAS compounds?"
+        </div>
+    </div>
+</div>
         <!-- Typing Indicator -->
         <div class="message bot">
-            <div class="message-avatar">AI</div>
+           
             <div class="typing-indicator" id="typingIndicator">
                 <span></span>
                 <span></span>
@@ -337,7 +347,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const avatarDiv = document.createElement('div');
         avatarDiv.className = 'message-avatar';
-        avatarDiv.textContent = sender === 'bot' ? 'AI' : 'U';
+        avatarDiv.textContent = sender === 'bot' ? 'NS' : 'U';
         
         const contentDiv = document.createElement('div');
         contentDiv.className = 'message-content';
