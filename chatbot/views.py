@@ -18,11 +18,20 @@ FAQ_CSV_PATH = os.path.join(os.path.dirname(__file__), 'data', 'chatbot_faq.csv'
 @ensure_csrf_cookie
 def home(request):
     """Render the home page with chatbot widget"""
-    return render(request, 'chatbot/home.html', {})
+    return render(request, 'chatbot/index.html', {})
+
 
 @require_http_methods(["GET", "POST"])
 def chatbot_api(request):
-    """Handle chatbot API with 3-tier system + retry support"""
+    """
+    4-Tier Chatbot with Feedback on ALL responses
+    
+    Flow:
+    1. FAQ → Show feedback → If NO → Try PDF RAG
+    2. PDF RAG → Show feedback → If NO → Try SQL
+    3. SQL → Show feedback → If NO → Try LLM
+    4. LLM → Show feedback (no retry available)
+    """
     
     if request.method == "GET":
         action = request.GET.get('action', '')
@@ -32,11 +41,12 @@ def chatbot_api(request):
     
     # POST - Handle user questions
     request_start = time.time()
+    faq_time = 0
     
     try:
         data = json.loads(request.body)
         user_message = data.get('message', '').strip()
-        skip_tier = data.get('skip_tier', 0)  # ← NEW: Which tier to skip
+        skip_tier = data.get('skip_tier', 0)
         
         if not user_message:
             return JsonResponse({'error': 'Message cannot be empty'}, status=400)
@@ -44,40 +54,52 @@ def chatbot_api(request):
         if len(user_message) > 1000:
             return JsonResponse({'error': 'Message too long'}, status=400)
         
-        # TIER 1: Try FAQ first (unless skipped)
+        print(f"\n{'='*60}")
+        print(f"📨 Query: '{user_message[:50]}...' (skip_tier={skip_tier})")
+        print(f"{'='*60}")
+        
+        # ============================================================
+        # TIER 1: FAQ HANDLER
+        # ============================================================
         if skip_tier < 1:
             faq_start = time.time()
             faq_handler = get_faq_handler(FAQ_CSV_PATH)
             
-            if not faq_handler:
-                return JsonResponse({'error': 'FAQ system not available'}, status=500)
-            
-            faq_result = faq_handler.answer(user_message, threshold=0.6)
-            faq_time = time.time() - faq_start
-            
-            if faq_result['found']:
-                total_time = time.time() - request_start
+            if faq_handler:
+                faq_result = faq_handler.answer(user_message, threshold=0.6)
+                faq_time = time.time() - faq_start
                 
-                return JsonResponse({
-                    'response': faq_result['answer'],
-                    'type': 'faq',
-                    'tier': 1,
-                    'similarity': faq_result['similarity'],
-                    'confidence': faq_result['confidence'],
-                    'can_retry': True,  # ← NEW: Enable retry
-                    'timing': {
-                        'faq_ms': faq_time * 1000,
-                        'total_ms': total_time * 1000
-                    },
-                    'cost': {
-                        'total': 0.0
-                    },
-                    'timestamp': datetime.now().isoformat()
-                })
+                if faq_result['found']:
+                    total_time = time.time() - request_start
+                    
+                    print(f"✅ TIER 1 (FAQ): Match found (similarity: {faq_result['similarity']:.3f})")
+                    
+                    return JsonResponse({
+                        'response': faq_result['answer'],
+                        'type': 'faq',
+                        'tier': 1,
+                        'tier_name': 'FAQ',
+                        'similarity': faq_result['similarity'],
+                        'confidence': faq_result['confidence'],
+                        'can_retry': True,  # ✅ SHOW FEEDBACK
+                        'next_tier': 'PDF Documents',
+                        'timing': {
+                            'faq_ms': faq_time * 1000,
+                            'total_ms': total_time * 1000
+                        },
+                        'cost': {
+                            'total': 0.0
+                        },
+                        'timestamp': datetime.now().isoformat()
+                    })
+                else:
+                    print(f"⏭️ TIER 1 (FAQ): No match (best: {faq_result.get('similarity', 0):.3f})")
         
-        # TIER 2: Try PDF RAG (unless skipped)
+        # ============================================================
+        # TIER 2: PDF RAG HANDLER
+        # ============================================================
         if skip_tier < 2:
-            print(f"📚 FAQ didn't match or skipped (skip_tier={skip_tier}), trying PDF RAG...")
+            print(f"📚 Trying TIER 2: PDF RAG...")
             
             try:
                 rag_start = time.time()
@@ -89,14 +111,18 @@ def chatbot_api(request):
                 if rag_result['found']:
                     total_time = time.time() - request_start
                     
+                    print(f"✅ TIER 2 (PDF RAG): Answer generated (similarity: {rag_result.get('top_similarity', 0):.3f})")
+                    
                     return JsonResponse({
                         'response': rag_result['answer'],
                         'type': 'pdf_rag',
                         'tier': 2,
+                        'tier_name': 'PDF Documents',
                         'sources': rag_result.get('sources', [])[:3],
                         'similarity': rag_result.get('top_similarity', 0),
                         'answer_method': rag_result.get('answer_method', 'template'),
-                        'can_retry': False,  
+                        'can_retry': True,  # ✅ SHOW FEEDBACK
+                        'next_tier': 'Chemical Database',
                         'timing': {
                             'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
                             'rag_search_ms': rag_result['timing']['search_ms'],
@@ -110,65 +136,151 @@ def chatbot_api(request):
                         },
                         'timestamp': datetime.now().isoformat()
                     })
+                else:
+                    print(f"⏭️ TIER 2 (PDF RAG): No match (best: {rag_result.get('top_similarity', 0):.3f})")
                     
             except Exception as e:
-                print(f"⚠️ PDF RAG error: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"❌ TIER 2 (PDF RAG): Error - {e}")
         
-        # TIER 3: Try SQL Agent
-        print(f"🤖 PDF RAG didn't match or skipped (skip_tier={skip_tier}), trying SQL Agent...")
+        # ============================================================
+        # TIER 3: SQL AGENT
+        # ============================================================
+        if skip_tier < 3:
+            print(f"🗄️ Trying TIER 3: SQL Agent...")
+            
+            try:
+                sql_start = time.time()
+                sql_agent = get_sql_agent()
+                
+                sql_result = sql_agent.answer(user_message)
+                sql_time = time.time() - sql_start
+                
+                # Check if sql_result is valid
+                if sql_result and isinstance(sql_result, dict):
+                    has_results = sql_result.get('result_count', 0) > 0
+                    
+                    if has_results:
+                        total_time = time.time() - request_start
+                        
+                        print(f"✅ TIER 3 (SQL): {sql_result.get('result_count', 0)} results found")
+                        
+                        return JsonResponse({
+                            'response': sql_result['answer'],
+                            'type': 'sql_agent',
+                            'tier': 3,
+                            'tier_name': 'Chemical Database',
+                            'sql_query': sql_result.get('sql_query'),
+                            'result_count': sql_result.get('result_count', 0),
+                            'can_retry': True,  # ✅ SHOW FEEDBACK
+                            'next_tier': 'AI Assistant',
+                            'timing': {
+                                'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
+                                'sql_generation_ms': sql_result['timing']['generation_ms'],
+                                'sql_execution_ms': sql_result['timing']['execution_ms'],
+                                'sql_formatting_ms': sql_result['timing']['formatting_ms'],
+                                'sql_total_ms': sql_result['timing']['total_ms'],
+                                'total_ms': total_time * 1000
+                            },
+                            'cost': {
+                                'sql_generation': sql_result['cost']['generation'],
+                                'sql_formatting': sql_result['cost']['formatting'],
+                                'total': sql_result['cost']['total']
+                            },
+                            'timestamp': datetime.now().isoformat()
+                        })
+                    else:
+                        print(f"⏭️ TIER 3 (SQL): No results returned")
+                else:
+                    print(f"⏭️ TIER 3 (SQL): Invalid result - {sql_result}")
+                    
+            except Exception as e:
+                print(f"❌ TIER 3 (SQL): Error - {e}")
+        
+        # ============================================================
+        # TIER 4: LLM FALLBACK (FINAL TIER - NO MORE RETRY)
+        # ============================================================
+        print(f"🤖 Trying TIER 4: LLM Fallback...")
         
         try:
-            sql_start = time.time()
-            sql_agent = get_sql_agent()
+            from openai import OpenAI
             
-            sql_result = sql_agent.answer(user_message)
-            sql_time = time.time() - sql_start
+            client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
             
+            llm_start = time.time()
+            
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a helpful assistant for the NORMAN Suspect List Exchange platform. "
+                            "Provide helpful, concise responses about environmental chemistry, "
+                            "chemical databases, and suspect screening. "
+                            "If you don't know something specific, suggest checking the NORMAN website."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": user_message
+                    }
+                ],
+                temperature=0.7,
+                max_tokens=400
+            )
+            
+            answer = response.choices[0].message.content.strip()
+            
+            # Calculate cost
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+            cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 1000
+            
+            llm_time = time.time() - llm_start
             total_time = time.time() - request_start
             
+            print(f"✅ TIER 4 (LLM): Response generated (cost: ${cost:.6f})")
+            
             return JsonResponse({
-                'response': sql_result['answer'],
-                'type': 'sql_agent',
-                'tier': 3,
-                'sql_query': sql_result.get('sql_query'),
-                'result_count': sql_result.get('result_count', 0),
-                'can_retry': False,  # ← NEW: No retry after Tier 3
+                'response': answer,
+                'type': 'llm_fallback',
+                'tier': 4,
+                'tier_name': 'AI Assistant',
+                'can_retry': False,  # ❌ NO MORE TIERS - SHOW FEEDBACK BUT NO RETRY
+                'next_tier': None,
                 'timing': {
                     'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
-                    'sql_generation_ms': sql_result['timing']['generation_ms'],
-                    'sql_execution_ms': sql_result['timing']['execution_ms'],
-                    'sql_formatting_ms': sql_result['timing']['formatting_ms'],
-                    'sql_total_ms': sql_result['timing']['total_ms'],
+                    'llm_ms': llm_time * 1000,
                     'total_ms': total_time * 1000
                 },
                 'cost': {
-                    'sql_generation': sql_result['cost']['generation'],
-                    'sql_formatting': sql_result['cost']['formatting'],
-                    'total': sql_result['cost']['total']
+                    'llm': cost,
+                    'total': cost
                 },
                 'timestamp': datetime.now().isoformat()
             })
             
         except Exception as e:
-            print(f"⚠️ SQL Agent error: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"❌ TIER 4 (LLM): Error - {e}")
             
-            # Final fallback
+            # ============================================================
+            # ABSOLUTE FALLBACK (IF EVEN LLM FAILS)
+            # ============================================================
             total_time = time.time() - request_start
             
             return JsonResponse({
                 'response': (
-                    "I'm not sure how to answer that. Try:\n"
-                    "• Browsing FAQ categories\n"
-                    "• Being more specific\n"
-                    "• Checking spelling"
+                    "I'm having trouble answering that question. Please try:\n\n"
+                    "• **Rephrasing your question** - Be more specific\n"
+                    "• **Browsing FAQ categories** - Find related topics\n"
+                    "• **Checking spelling** - Make sure terms are correct\n\n"
+                    "Or ask me something else!"
                 ),
-                'type': 'unknown',
+                'type': 'error',
                 'tier': 0,
+                'tier_name': 'Error',
                 'can_retry': False,
+                'next_tier': None,
                 'timing': {
                     'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
                     'total_ms': total_time * 1000
@@ -189,9 +301,7 @@ def chatbot_api(request):
 
 
 def get_categories_api():
-    """
-    Return FAQ categories with icons from CSV
-    """
+    """Return FAQ categories with icons from CSV"""
     faq_handler = get_faq_handler(FAQ_CSV_PATH)
     
     if not faq_handler:
@@ -199,23 +309,20 @@ def get_categories_api():
     
     # Group FAQs by category
     categories_dict = {}
-    category_icons = {}  # Store icons
+    category_icons = {}
     
     for faq in faq_handler.faq_data:
-        # Use category_lvl1 from CSV
         category = faq.get('category_lvl1', 'General')
         
-        # Store icon for this category
         if category not in category_icons:
             category_icons[category] = faq.get('category_icon', '📁')
         
         if category not in categories_dict:
             categories_dict[category] = []
         
-        # Use button_label (full text) instead of truncated question
         categories_dict[category].append({
-            'q': faq.get('button_label', faq.get('question', '')),  # Full button text
-            'question': faq.get('question', ''),  # Full question for embedding
+            'q': faq.get('button_label', faq.get('question', '')),
+            'question': faq.get('question', ''),
             'id': faq.get('id', ''),
             'short_answer': faq.get('short_answer', '')
         })
@@ -227,10 +334,10 @@ def get_categories_api():
             'name': category_name,
             'display_name': category_name,
             'count': len(questions),
-            'icon': category_icons.get(category_name, '📁')  # Use CSV icon
+            'icon': category_icons.get(category_name, '📁')
         })
     
-    # Sort by category order (as in CSV)
+    # Sort by category order
     category_order = {
         'Getting started': 1,
         'Using the website': 2,
@@ -253,16 +360,12 @@ def get_categories_api():
 
 @require_http_methods(["GET"])
 def debug_categories(request):
-    """
-    Debug: http://localhost:8000/debug-categories/
-    Shows all FAQs and their categories
-    """
+    """Debug: Shows all FAQs and their categories"""
     faq_handler = get_faq_handler(FAQ_CSV_PATH)
     
     if not faq_handler:
         return JsonResponse({'error': 'FAQ handler not initialized'}, status=500)
     
-    # Count FAQs per category
     category_counts = {}
     faq_list = []
     
@@ -289,16 +392,36 @@ def debug_categories(request):
 
 @require_http_methods(["POST"])
 def chatbot_feedback(request):
-    """Track user feedback"""
+    """Store user feedback with full context"""
     try:
         data = json.loads(request.body)
-        helpful = data.get('helpful')
-        tier = data.get('tier')
-        message_type = data.get('type')
         
-        # Log to database or file
-        print(f"📊 Feedback: helpful={helpful}, tier={tier}, type={message_type}")
+        feedback_data = {
+            'helpful': data.get('helpful'),
+            'tier': data.get('tier'),
+            'tier_name': data.get('tier_name'),
+            'type': data.get('type'),
+            'timestamp': data.get('timestamp'),
+            'user_session': request.session.session_key
+        }
         
-        return JsonResponse({'status': 'ok'})
+        print(f"\n{'='*60}")
+        print(f"📊 USER FEEDBACK RECEIVED")
+        print(f"{'='*60}")
+        print(f"   Helpful: {feedback_data['helpful']}")
+        print(f"   Tier: {feedback_data['tier']} ({feedback_data['tier_name']})")
+        print(f"   Type: {feedback_data['type']}")
+        print(f"{'='*60}\n")
+        
+        # TODO: Store in database
+        # Feedback.objects.create(**feedback_data)
+        
+        return JsonResponse({
+            'status': 'success',
+            'message': 'Feedback recorded',
+            'timestamp': datetime.now().isoformat()
+        })
+        
     except Exception as e:
+        print(f"❌ Error recording feedback: {e}")
         return JsonResponse({'error': str(e)}, status=500)

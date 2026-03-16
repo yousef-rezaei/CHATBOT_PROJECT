@@ -1,20 +1,17 @@
 {% load static %}
-<!-- Chatbot Widget - FULLY DYNAMIC with Icons from CSV -->
+<!-- NORMAN SLE Chatbot Widget - Clean Version -->
 
-<!-- Link to External CSS -->
 <link rel="stylesheet" href="{% static 'css/chatbot.css' %}">
 
 <!-- Chatbot Toggle Button -->
-<button class="chatbot-button" id="chatbotToggle" aria-label="Toggle  Chatbot">
-    <!-- Menu Icon (3 lines) -->
+<button class="chatbot-button" id="chatbotToggle" aria-label="Toggle Chatbot">
     <svg id="chatIcon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="white">
         <rect x="5" y="6" width="14" height="2" rx="1"/>
         <rect x="5" y="11" width="14" height="2" rx="1"/>
         <rect x="5" y="16" width="14" height="2" rx="1"/>
     </svg>
     
-    <!-- Close Icon (X) -->
-    <svg id="closeIcon" style="display: none;" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <svg id="closeIcon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
         <path d="M18 6L6 18M6 6l12 12" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none"/>
     </svg>
 </button>
@@ -42,7 +39,7 @@
 
     <!-- Messages Area -->
     <div class="chatbot-messages" id="chatbotMessages">
-        <!-- Initial Bot Message -->
+        <!-- Welcome Message - WITH AVATAR -->
         <div class="message bot">
             <div class="message-avatar">NS</div>
             <div class="message-content">
@@ -53,46 +50,39 @@
             </div>
         </div>
 
-        <!-- Add after welcome message -->
-<div class="message bot">
-    <div class="message-avatar">NS</div>
-    <div class="message-content">
-        <div class="message-bubble">
-            💡 <strong>Tip:</strong> I can answer FAQ questions AND search the database!
-            <br>Try: "Find chemicals containing benzene" or "How many PFAS compounds?"
-        </div>
-    </div>
-</div>
-        <!-- Typing Indicator -->
+        <!-- Tip Message - WITH AVATAR -->
         <div class="message bot">
-           
+            <div class="message-avatar">NS</div>
+            <div class="message-content">
+                <div class="message-bubble">
+                    💡 <strong>Tip:</strong> I can answer FAQ questions AND search the database!
+                    <br>Try: "Find chemicals containing benzene" or "How many PFAS compounds?"
+                </div>
+            </div>
+        </div>
+
+        <!-- Typing Indicator - WITH AVATAR -->
+        <div class="message bot">
+            <div class="message-avatar">NS</div>
             <div class="typing-indicator" id="typingIndicator">
-                <span></span>
-                <span></span>
-                <span></span>
+                <span class="typing-dot"></span>
+                <span class="typing-dot"></span>
+                <span class="typing-dot"></span>
             </div>
         </div>
     </div>
 
-    <!-- Sticky Quick Actions with Category Navigation -->
+    <!-- Quick Actions -->
     <div class="quick-actions-sticky">
-        <!-- Back Button (hidden by default) -->
-        <button class="back-to-categories" id="backButton" style="display: none;">
+        <button class="back-to-categories" id="backButton">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                 <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
             </svg>
             Back to Categories
         </button>
         
-        <!-- Categories View - DYNAMICALLY GENERATED FROM BACKEND -->
-        <div class="quick-actions categories-scroll" id="categoriesView">
-            <!-- Categories loaded from backend via API -->
-        </div>
-        
-        <!-- Questions View (hidden by default) -->
-        <div class="quick-actions questions-scroll" id="questionsView" style="display: none;">
-            <!-- Questions dynamically loaded here -->
-        </div>
+        <div class="quick-actions" id="categoriesView"></div>
+        <div class="quick-actions" id="questionsView"></div>
     </div>
 
     <!-- Input Area -->
@@ -102,10 +92,9 @@
             id="chatbotInput" 
             placeholder="Ask me anything..." 
             rows="1"
-            aria-label="Message input"
         ></textarea>
         
-        <button class="chatbot-send-button" id="chatbotSend" aria-label="Send message">
+        <button class="chatbot-send-button" id="chatbotSend">
             <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
             </svg>
@@ -113,280 +102,6 @@
     </div>
 </div>
 
-<!-- Additional Styles for Category Navigation -->
-<style>
-/* Back button */
-.back-to-categories {
-    display: none;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    margin-bottom: 8px;
-    background: white;
-    border: 1px solid #c0d6c0;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #6b9e78;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    width: fit-content;
-}
-
-.back-to-categories:hover {
-    background: #e8f4ea;
-    border-color: #6b9e78;
-}
-
-.back-to-categories svg {
-    flex-shrink: 0;
-}
-
-/* Category buttons with icons from CSV */
-.category-btn {
-    font-size: 13px !important;
-    padding: 8px 14px !important;
-    font-weight: 500 !important;
-}
-
-/* Icon styling for black & white look */
-.category-btn .category-icon {
-    font-size: 14px;
-    margin-right: 6px;
-    color: #2d3e2d;
-    font-weight: bold;
-}
-
-/* Question buttons */
-.question-btn {
-    font-size: 12px !important;
-    padding: 8px 12px !important;
-    text-align: left;
-}
-
-/* Ensure scrolling works */
-.categories-scroll,
-.questions-scroll {
-    display: flex;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    gap: 8px;
-    overflow-x: auto;
-    scroll-behavior: smooth;
-}
-</style>
-
-<!-- Category Navigation JavaScript - Icons from Backend -->
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Elements
-    const categoriesView = document.getElementById('categoriesView');
-    const questionsView = document.getElementById('questionsView');
-    const backButton = document.getElementById('backButton');
-    
-    // Storage for FAQ data from backend
-    let faqDataByCategory = {};
-    
-    // Load categories and FAQs from backend
-    loadCategoriesFromBackend();
-    
-    function loadCategoriesFromBackend() {
-        // Fetch categories from Django backend
-        fetch(window.CHATBOT_CONFIG.apiEndpoint + '?action=get_categories', {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.categories) {
-                // Store FAQ data by category
-                faqDataByCategory = data.faq_data || {};
-                
-                // Generate category buttons
-                generateCategoryButtons(data.categories);
-            }
-        })
-        .catch(error => {
-            console.error('Error loading categories:', error);
-            // Fallback: show a generic message
-            categoriesView.innerHTML = '<p style="color: #666; padding: 10px;">Categories loading...</p>';
-        });
-    }
-    
-    function generateCategoryButtons(categories) {
-        // Clear existing buttons
-        categoriesView.innerHTML = '';
-        
-        // Create button for each category
-        categories.forEach(category => {
-            const btn = document.createElement('button');
-            btn.className = 'quick-action-btn category-btn';
-            btn.dataset.category = category.name;
-            
-            // Get icon from backend (or use default)
-            const icon = category.icon || '●';
-            
-            // Create icon span
-            const iconSpan = document.createElement('span');
-            iconSpan.className = 'category-icon';
-            iconSpan.textContent = icon;
-            
-            // Create text node
-            const textNode = document.createTextNode(category.display_name || category.name);
-            
-            // Append icon and text to button
-            btn.appendChild(iconSpan);
-            btn.appendChild(textNode);
-            
-            // Add click handler
-            btn.addEventListener('click', function() {
-                showQuestions(category.name);
-            });
-            
-            categoriesView.appendChild(btn);
-        });
-    }
-    
-    // Handle back button
-    backButton.addEventListener('click', showCategories);
-    
-    function showQuestions(category) {
-        // Hide categories, show questions
-        categoriesView.style.display = 'none';
-        questionsView.style.display = 'flex';
-        backButton.style.display = 'flex';
-        
-        // Get questions for this category from stored data
-        const questions = faqDataByCategory[category] || [];
-        
-        // Clear and populate
-        questionsView.innerHTML = '';
-        
-        if (questions.length === 0) {
-            questionsView.innerHTML = '<p style="color: #666; padding: 10px;">No questions found</p>';
-            return;
-        }
-        
-        questions.forEach(item => {
-            const btn = document.createElement('button');
-            btn.className = 'quick-action-btn question-btn';
-            btn.textContent = item.q || item.question;
-            btn.dataset.message = item.q || item.question;
-            
-            // Add click handler to send question and show answer
-            btn.addEventListener('click', function() {
-                handleQuestionClick(item.q || item.question);
-            });
-            
-            questionsView.appendChild(btn);
-        });
-    }
-    
-    function handleQuestionClick(question) {
-        // Add user message to chat
-        addMessage(question, 'user');
-        
-        // Show typing indicator
-        const typingIndicator = document.getElementById('typingIndicator');
-        if (typingIndicator) {
-            typingIndicator.classList.add('active');
-        }
-        
-        // Send to backend API
-        fetch(window.CHATBOT_CONFIG.apiEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': window.CHATBOT_CONFIG.csrfToken
-            },
-            body: JSON.stringify({
-                message: question
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            // Hide typing indicator
-            if (typingIndicator) {
-                typingIndicator.classList.remove('active');
-            }
-            
-            // Add bot answer from backend
-            addMessage(data.response || data.message, 'bot');
-            
-            // Go back to categories after answering
-            setTimeout(() => {
-                showCategories();
-            }, 500);
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            
-            // Hide typing indicator
-            if (typingIndicator) {
-                typingIndicator.classList.remove('active');
-            }
-            
-            // Show error message
-            addMessage('Sorry, I encountered an error. Please try again.', 'bot');
-            
-            // Go back to categories
-            setTimeout(() => {
-                showCategories();
-            }, 500);
-        });
-    }
-    
-    function addMessage(text, sender) {
-        const messagesContainer = document.getElementById('chatbotMessages');
-        
-        // Create message element
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${sender}`;
-        
-        const avatarDiv = document.createElement('div');
-        avatarDiv.className = 'message-avatar';
-        avatarDiv.textContent = sender === 'bot' ? 'NS' : 'U';
-        
-        const contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
-        
-        const bubbleDiv = document.createElement('div');
-        bubbleDiv.className = 'message-bubble';
-        bubbleDiv.textContent = text;
-        
-        const timeDiv = document.createElement('div');
-        timeDiv.className = 'message-time';
-        timeDiv.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-        
-        contentDiv.appendChild(bubbleDiv);
-        contentDiv.appendChild(timeDiv);
-        
-        messageDiv.appendChild(avatarDiv);
-        messageDiv.appendChild(contentDiv);
-        
-        // Insert before typing indicator
-        const typingIndicator = document.getElementById('typingIndicator');
-        if (typingIndicator && typingIndicator.parentElement) {
-            messagesContainer.insertBefore(messageDiv, typingIndicator.parentElement);
-        } else {
-            messagesContainer.appendChild(messageDiv);
-        }
-        
-        // Scroll to bottom
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }
-    
-    function showCategories() {
-        categoriesView.style.display = 'flex';
-        questionsView.style.display = 'none';
-        backButton.style.display = 'none';
-    }
-});
-</script>
-
-<!-- JavaScript Configuration -->
 <script>
     window.CHATBOT_CONFIG = {
         apiEndpoint: '{% url "chatbot:chatbot_api" %}',

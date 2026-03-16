@@ -1,43 +1,31 @@
 /**
- * NORMAN SLE Chatbot Widget - WITH FEEDBACK + RETRY SYSTEM
- * Features:
- * - Fixed: Double-sending messages from quick action buttons
- * - NEW: Feedback buttons (👍 Helpful / 👎 Try Another Source)
- * - NEW: Multi-tier retry system (FAQ → PDF RAG → SQL Agent)
+ * NORMAN SLE Chatbot - FINAL COMPLETE VERSION
+ * ✅ All messages with avatars (NS or U)
+ * ✅ Gradient feedback buttons with text
+ * ✅ Category navigation
+ * ✅ No duplicate code
  */
 (function() {
     'use strict';
     
-    // Prevent multiple initialization
-    if (window.NormanChatbotInitialized) {
-        console.log('⚠️ Chatbot already initialized, skipping...');
-        return;
-    }
+    if (window.NormanChatbotInitialized) return;
     window.NormanChatbotInitialized = true;
-    console.log('🤖 Chatbot script loaded');
     
-    // Configuration
     const CONFIG = window.CHATBOT_CONFIG || {
         apiEndpoint: '/api/chatbot/message/',
         csrfToken: document.querySelector('[name=csrfmiddlewaretoken]')?.value || '',
     };
     
-    // DOM Elements
     let elements = {};
-    
-    // State
     const state = {
         isOpen: false,
         isProcessing: false,
-        messageHistory: [],
-        lastUserMessage: '', // NEW: Track last question for retry
+        lastUserMessage: '',
+        conversationContext: [],
+        faqDataByCategory: {}
     };
     
-    /**
-     * Initialize the chatbot
-     */
     function init() {
-        console.log('🔧 Initializing chatbot...');
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initElements);
         } else {
@@ -45,12 +33,7 @@
         }
     }
     
-    /**
-     * Initialize DOM elements and event listeners
-     */
     function initElements() {
-        console.log('📦 Finding DOM elements...');
-        
         elements = {
             chatbotToggle: document.getElementById('chatbotToggle'),
             chatbotContainer: document.getElementById('chatbotContainer'),
@@ -61,39 +44,21 @@
             typingIndicator: document.getElementById('typingIndicator'),
             chatIcon: document.getElementById('chatIcon'),
             closeIcon: document.getElementById('closeIcon'),
-            quickActionBtns: document.querySelectorAll('.quick-action-btn'),
+            categoriesView: document.getElementById('categoriesView'),
+            questionsView: document.getElementById('questionsView'),
+            backButton: document.getElementById('backButton'),
         };
         
-        // Verify all elements exist
-        let allFound = true;
-        for (const [key, element] of Object.entries(elements)) {
-            if (!element && key !== 'quickActionBtns') {
-                console.error(`❌ Element not found: ${key}`);
-                allFound = false;
-            }
-        }
-        
-        if (!allFound) {
-            console.error('❌ Some chatbot elements are missing from the page!');
-            return;
-        }
-        
-        console.log('✅ All elements found, attaching listeners...');
         attachEventListeners();
+        loadCategories();
         scrollToBottom();
-        console.log('✅ Chatbot ready!');
     }
     
-    /**
-     * Attach all event listeners
-     */
     function attachEventListeners() {
-        // Toggle chatbot
         if (elements.chatbotToggle) {
             elements.chatbotToggle.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log('🖱️ Toggle button clicked');
                 toggleChatbot();
             });
         }
@@ -102,108 +67,45 @@
             elements.chatbotClose.addEventListener('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                console.log('🖱️ Close button clicked');
                 toggleChatbot();
             });
         }
         
-        // Auto-resize textarea
         if (elements.chatbotInput) {
             elements.chatbotInput.addEventListener('input', autoResizeTextarea);
             elements.chatbotInput.addEventListener('keydown', handleInputKeydown);
         }
         
-        // Send button click
         if (elements.chatbotSend) {
-            elements.chatbotSend.addEventListener('click', function(e) {
+            elements.chatbotSend.addEventListener('click', async function(e) {
                 e.preventDefault();
                 e.stopPropagation();
-                sendMessage();
+                await sendMessage();
             });
         }
         
-        // Quick action buttons
-        if (elements.quickActionBtns && elements.quickActionBtns.length > 0) {
-            console.log(`📌 Attaching ${elements.quickActionBtns.length} quick action listeners`);
-            
-            elements.quickActionBtns.forEach((btn, index) => {
-                if (btn.dataset.listenerAttached === 'true') {
-                    console.log(`⏭️ Button ${index} already has listener, skipping`);
-                    return;
-                }
-                
+        if (elements.backButton) {
+            elements.backButton.addEventListener('click', showCategories);
+        }
+        
+        // Dynamic quick action buttons (from HTML, not categories)
+        document.querySelectorAll('.quick-action-btn').forEach(btn => {
+            if (!btn.dataset.listenerAttached) {
                 btn.dataset.listenerAttached = 'true';
-                
                 btn.addEventListener('click', function(e) {
                     e.preventDefault();
                     e.stopPropagation();
-                    
-                    if (state.isProcessing) {
-                        console.log('⏸️ Already processing, ignoring quick action click');
-                        return;
+                    if (!state.isProcessing) {
+                        const message = this.getAttribute('data-message');
+                        if (message) {
+                            handleQuickAction(message);
+                        }
                     }
-                    
-                    const message = this.getAttribute('data-message');
-                    if (message) {
-                        console.log(`🎯 Quick action clicked: "${message}"`);
-                        handleQuickAction(message);
-                    } else {
-                        console.warn('⚠️ Quick action button has no data-message attribute');
-                    }
-                }, { once: false });
-                
-                console.log(`✅ Attached listener to button ${index}: "${btn.textContent.trim()}"`);
-            });
-        }
-        
-        console.log('✅ All event listeners attached');
+                });
+            }
+        });
     }
     
-    /**
-     * Toggle chatbot open/close
-     */
-    function toggleChatbot() {
-        console.log('🔄 Toggling chatbot, current state:', state.isOpen);
-        
-        state.isOpen = !state.isOpen;
-        
-        if (state.isOpen) {
-            console.log('📖 Opening chatbot...');
-            elements.chatbotContainer.classList.add('active');
-            elements.chatbotToggle.classList.add('active');
-            elements.chatIcon.style.display = 'none';
-            elements.closeIcon.style.display = 'block';
-            
-            setTimeout(() => {
-                if (elements.chatbotInput) {
-                    elements.chatbotInput.focus();
-                }
-            }, 300);
-            
-            console.log('✅ Chatbot opened');
-        } else {
-            console.log('📕 Closing chatbot...');
-            elements.chatbotContainer.classList.remove('active');
-            elements.chatbotToggle.classList.remove('active');
-            elements.chatIcon.style.display = 'block';
-            elements.closeIcon.style.display = 'none';
-            
-            console.log('✅ Chatbot closed');
-        }
-    }
-    
-    /**
-     * Auto-resize textarea based on content
-     */
-    function autoResizeTextarea() {
-        const textarea = elements.chatbotInput;
-        textarea.style.height = 'auto';
-        textarea.style.height = Math.min(textarea.scrollHeight, 100) + 'px';
-    }
-    
-    /**
-     * Handle input keydown events
-     */
     function handleInputKeydown(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -211,122 +113,281 @@
         }
     }
     
-    /**
-     * Handle quick action button clicks
-     */
     function handleQuickAction(message) {
-        if (!message) {
-            console.warn('⚠️ handleQuickAction called with empty message');
-            return;
-        }
-        
-        if (state.isProcessing) {
-            console.log('⏸️ Already processing, cannot handle quick action');
-            return;
-        }
-        
-        console.log('📝 Handling quick action:', message);
+        if (!message || state.isProcessing) return;
         elements.chatbotInput.value = message;
         sendMessage();
     }
     
-    /**
-     * Add message to chat - NEW: With feedback buttons
-     */
+    function toggleChatbot() {
+        state.isOpen = !state.isOpen;
+        
+        if (state.isOpen) {
+            elements.chatbotContainer.classList.add('active');
+            elements.chatbotToggle.classList.add('active');
+            elements.chatIcon.style.display = 'none';
+            elements.closeIcon.style.display = 'block';
+            setTimeout(() => elements.chatbotInput?.focus(), 300);
+        } else {
+            elements.chatbotContainer.classList.remove('active');
+            elements.chatbotToggle.classList.remove('active');
+            elements.chatIcon.style.display = 'block';
+            elements.closeIcon.style.display = 'none';
+        }
+    }
+    
+    function autoResizeTextarea() {
+        const textarea = elements.chatbotInput;
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 100) + 'px';
+    }
+    
+    // ========================================
+    // CATEGORY MANAGEMENT
+    // ========================================
+    function loadCategories() {
+        fetch(CONFIG.apiEndpoint + '?action=get_categories')
+            .then(response => response.json())
+            .then(data => {
+                if (data.categories) {
+                    state.faqDataByCategory = data.faq_data || {};
+                    renderCategories(data.categories);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading categories:', error);
+            });
+    }
+    
+    function renderCategories(categories) {
+        if (!elements.categoriesView) return;
+        elements.categoriesView.innerHTML = '';
+        
+        categories.forEach(category => {
+            const btn = document.createElement('button');
+            btn.className = 'quick-action-btn category-btn';
+            btn.innerHTML = `<span class="category-icon">${category.icon || '●'}</span>${category.display_name || category.name}`;
+            btn.addEventListener('click', () => showQuestions(category.name));
+            elements.categoriesView.appendChild(btn);
+        });
+    }
+    
+    function showQuestions(category) {
+        elements.categoriesView.style.display = 'none';
+        elements.questionsView.style.display = 'flex';
+        elements.backButton.style.display = 'flex';
+        
+        const questions = state.faqDataByCategory[category] || [];
+        elements.questionsView.innerHTML = '';
+        
+        questions.forEach(item => {
+            const btn = document.createElement('button');
+            btn.className = 'quick-action-btn question-btn';
+            btn.textContent = item.q || item.question;
+            btn.addEventListener('click', () => {
+                handleQuestionClick(item.q || item.question);
+            });
+            elements.questionsView.appendChild(btn);
+        });
+    }
+    
+    function showCategories() {
+        elements.categoriesView.style.display = 'flex';
+        elements.questionsView.style.display = 'none';
+        elements.backButton.style.display = 'none';
+    }
+    
+    function handleQuestionClick(question) {
+        // Add user message
+        addMessage(question, true);
+        
+        // Show typing
+        setTyping(true);
+        
+        // Send to backend
+        fetch(CONFIG.apiEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CONFIG.csrfToken
+            },
+            body: JSON.stringify({ message: question })
+        })
+        .then(response => response.json())
+        .then(data => {
+            setTyping(false);
+            addMessage(data.response, false, data);
+            setTimeout(showCategories, 500);
+        })
+        .catch(error => {
+            setTyping(false);
+            addMessage('Sorry, I encountered an error. Please try again.', false);
+            setTimeout(showCategories, 500);
+        });
+    }
+    
+    // ========================================
+    // MESSAGE HANDLING - WITH AVATARS (NS/U)
+    // ========================================
     function addMessage(content, isUser = false, metadata = null) {
+        const messagesContainer = elements.chatbotMessages;
+        if (!messagesContainer) return;
+        
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
         
-        const time = new Date().toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit' 
-        });
+        // Avatar
+        const avatarDiv = document.createElement('div');
+        avatarDiv.className = 'message-avatar';
+        avatarDiv.textContent = isUser ? 'U' : 'NS';
         
-        const messageContent = document.createElement('div');
-        messageContent.className = 'message-content';
+        // Content wrapper
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
         
-        const messageBubble = document.createElement('div');
-        messageBubble.className = 'message-bubble';
-        messageBubble.innerHTML = escapeHtml(content);
+        // Message bubble
+        const bubbleDiv = document.createElement('div');
+        bubbleDiv.className = 'message-bubble';
+        bubbleDiv.innerHTML = content
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/\n/g, '<br>')
+            .replace(/• /g, '• ');
         
-        const messageTime = document.createElement('div');
-        messageTime.className = 'message-time';
-        messageTime.textContent = time;
+        // Time
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'message-time';
+        timeDiv.textContent = new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
         
-        messageContent.appendChild(messageBubble);
-        messageContent.appendChild(messageTime);
+        contentDiv.appendChild(bubbleDiv);
+        contentDiv.appendChild(timeDiv);
         
-        const messageAvatar = document.createElement('div');
-        messageAvatar.className = 'message-avatar';
-        messageAvatar.textContent = isUser ? 'You' : 'NS';
+        messageDiv.appendChild(avatarDiv);
+        messageDiv.appendChild(contentDiv);
         
-        messageDiv.appendChild(messageAvatar);
-        messageDiv.appendChild(messageContent);
-        
-        // NEW: Add feedback buttons for bot messages (if retry is available)
-        if (!isUser && metadata && metadata.can_retry) {
+        // Add feedback buttons for bot messages
+        if (!isUser && metadata) {
             const feedbackDiv = createFeedbackButtons(metadata);
-            messageContent.appendChild(feedbackDiv);
+            contentDiv.appendChild(feedbackDiv);
         }
         
-        // Insert before typing indicator
-        const typingMessage = elements.typingIndicator.closest('.message');
-        elements.chatbotMessages.insertBefore(messageDiv, typingMessage);
-        
-        // Store in history
-        state.messageHistory.push({
-            content,
-            isUser,
-            timestamp: new Date(),
-        });
-        
-        scrollToBottom();
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
     
-    /**
-     * NEW: Create feedback buttons (👍 Helpful / 👎 Try Another Source)
-     */
+    // ========================================
+    // FEEDBACK BUTTONS - GRADIENT WITH TEXT
+    // ========================================
     function createFeedbackButtons(metadata) {
         const feedbackDiv = document.createElement('div');
         feedbackDiv.className = 'feedback-buttons';
-        feedbackDiv.style.marginTop = '10px';
-        feedbackDiv.style.display = 'flex';
-        feedbackDiv.style.gap = '10px';
-        feedbackDiv.style.flexWrap = 'wrap';
+        feedbackDiv.style.cssText = `
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding-top: 12px;
+            border-top: 1px solid rgba(0,0,0,0.08);
+        `;
         
-        // Thumbs up button
+        // THUMBS UP - GREEN GRADIENT
         const thumbsUpBtn = document.createElement('button');
-        thumbsUpBtn.innerHTML = '👍 Helpful';
-        thumbsUpBtn.className = 'feedback-btn';
+        thumbsUpBtn.innerHTML = '👍';
+        thumbsUpBtn.className = 'feedback-btn feedback-positive';
         thumbsUpBtn.style.cssText = `
-            padding: 6px 12px;
-            border: 1px solid #4CAF50;
-            border-radius: 4px;
-            background: white;
+            padding: 8px 16px;
+            border: 1.5px solid #4CAF50;
+            border-radius: 6px;
+            background: linear-gradient(135deg, #ffffff 0%, #f1f8f4 100%);
+            color: #4CAF50;
             cursor: pointer;
             font-size: 13px;
-            transition: all 0.2s;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(76, 175, 80, 0.1);
         `;
-        thumbsUpBtn.onmouseover = () => thumbsUpBtn.style.background = '#f1f8f4';
-        thumbsUpBtn.onmouseout = () => thumbsUpBtn.style.background = 'white';
+        
+        thumbsUpBtn.onmouseover = () => {
+            thumbsUpBtn.style.background = 'linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%)';
+            thumbsUpBtn.style.color = 'white';
+            thumbsUpBtn.style.transform = 'translateY(-1px)';
+            thumbsUpBtn.style.boxShadow = '0 4px 8px rgba(76, 175, 80, 0.2)';
+        };
+        
+        thumbsUpBtn.onmouseout = () => {
+            thumbsUpBtn.style.background = 'linear-gradient(135deg, #ffffff 0%, #f1f8f4 100%)';
+            thumbsUpBtn.style.color = '#4CAF50';
+            thumbsUpBtn.style.transform = 'translateY(0)';
+            thumbsUpBtn.style.boxShadow = '0 2px 4px rgba(76, 175, 80, 0.1)';
+        };
+        
         thumbsUpBtn.onclick = () => handleFeedback(true, metadata, feedbackDiv);
         
-        // Thumbs down button (retry)
+        // THUMBS DOWN
         const thumbsDownBtn = document.createElement('button');
-        thumbsDownBtn.innerHTML = '👎 Try Another Source';
-        thumbsDownBtn.className = 'feedback-btn';
-        thumbsDownBtn.style.cssText = `
-            padding: 6px 12px;
-            border: 1px solid #f44336;
-            border-radius: 4px;
-            background: white;
-            cursor: pointer;
-            font-size: 13px;
-            transition: all 0.2s;
-        `;
-        thumbsDownBtn.onmouseover = () => thumbsDownBtn.style.background = '#fef1f0';
-        thumbsDownBtn.onmouseout = () => thumbsDownBtn.style.background = 'white';
-        thumbsDownBtn.onclick = () => retryWithNextTier(metadata, feedbackDiv);
+        
+        if (metadata.can_retry) {
+            // BLUE GRADIENT - Can retry
+            thumbsDownBtn.innerHTML = `👎`;
+            thumbsDownBtn.className = 'feedback-btn feedback-retry';
+            thumbsDownBtn.style.cssText = `
+                padding: 8px 16px;
+                border: 1.5px solid #2196F3;
+                border-radius: 6px;
+                background: linear-gradient(135deg, #ffffff 0%, #e3f2fd 100%);
+                color: #2196F3;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                box-shadow: 0 2px 4px rgba(33, 150, 243, 0.1);
+            `;
+            
+            thumbsDownBtn.onmouseover = () => {
+                thumbsDownBtn.style.background = 'linear-gradient(135deg, #2196F3 0%, #42A5F5 100%)';
+                thumbsDownBtn.style.color = 'white';
+                thumbsDownBtn.style.transform = 'translateY(-1px)';
+                thumbsDownBtn.style.boxShadow = '0 4px 8px rgba(33, 150, 243, 0.2)';
+            };
+            
+            thumbsDownBtn.onmouseout = () => {
+                thumbsDownBtn.style.background = 'linear-gradient(135deg, #ffffff 0%, #e3f2fd 100%)';
+                thumbsDownBtn.style.color = '#2196F3';
+                thumbsDownBtn.style.transform = 'translateY(0)';
+                thumbsDownBtn.style.boxShadow = '0 2px 4px rgba(33, 150, 243, 0.1)';
+            };
+        } else {
+            // ORANGE GRADIENT - Final tier
+            thumbsDownBtn.innerHTML = '👎';
+            thumbsDownBtn.className = 'feedback-btn feedback-final';
+            thumbsDownBtn.style.cssText = `
+                padding: 8px 16px;
+                border: 1.5px solid #FF9800;
+                border-radius: 6px;
+                background: linear-gradient(135deg, #ffffff 0%, #fff3e0 100%);
+                color: #FF9800;
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                box-shadow: 0 2px 4px rgba(255, 152, 0, 0.1);
+            `;
+            
+            thumbsDownBtn.onmouseover = () => {
+                thumbsDownBtn.style.background = 'linear-gradient(135deg, #FF9800 0%, #FFB74D 100%)';
+                thumbsDownBtn.style.color = 'white';
+                thumbsDownBtn.style.transform = 'translateY(-1px)';
+                thumbsDownBtn.style.boxShadow = '0 4px 8px rgba(255, 152, 0, 0.2)';
+            };
+            
+            thumbsDownBtn.onmouseout = () => {
+                thumbsDownBtn.style.background = 'linear-gradient(135deg, #ffffff 0%, #fff3e0 100%)';
+                thumbsDownBtn.style.color = '#FF9800';
+                thumbsDownBtn.style.transform = 'translateY(0)';
+                thumbsDownBtn.style.boxShadow = '0 2px 4px rgba(255, 152, 0, 0.1)';
+            };
+        }
+        
+        thumbsDownBtn.onclick = () => handleFeedback(false, metadata, feedbackDiv);
         
         feedbackDiv.appendChild(thumbsUpBtn);
         feedbackDiv.appendChild(thumbsDownBtn);
@@ -334,58 +395,207 @@
         return feedbackDiv;
     }
     
-    /**
-     * NEW: Handle feedback button clicks
-     */
-    function handleFeedback(isPositive, metadata, feedbackDiv) {
-        console.log(`📊 Feedback: ${isPositive ? 'Helpful' : 'Not helpful'}, Tier: ${metadata.tier}`);
+    function handleFeedback(isHelpful, metadata, feedbackDiv) {
+        // Send feedback to backend
+        fetch('/api/chatbot/feedback/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+                helpful: isHelpful,
+                tier: metadata.tier,
+                tier_name: metadata.tier_name,
+                type: metadata.type,
+                timestamp: new Date().toISOString()
+            })
+        });
         
-        // Update UI
-        feedbackDiv.innerHTML = isPositive ? 
-            '<span style="color: #4CAF50; font-size: 13px;">✓ Thank you for your feedback!</span>' : 
-            '<span style="color: #f44336; font-size: 13px;">✓ Feedback recorded</span>';
-        
-        // Optional: Send feedback to backend for analytics
-        // (You can implement this later)
+        if (isHelpful) {
+            feedbackDiv.innerHTML = `
+                <div style="
+                    color: #4CAF50; 
+                    font-size: 13px; 
+                    font-weight: 500;
+                    display: flex;
+                    align-items: center;
+                    gap: 6px;
+                    padding: 8px 0;
+                ">
+                    <span style="font-size: 16px;">✓</span>
+                    <span>Thank you for your feedback!</span>
+                </div>
+            `;
+        } else {
+            if (metadata.can_retry) {
+                feedbackDiv.innerHTML = `
+                    <div style="
+                        color: #2196F3; 
+                        font-size: 13px; 
+                        font-weight: 500;
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 8px 0;
+                    ">
+                        <span style="font-size: 16px;">🔄</span>
+                        <span>Searching ${metadata.next_tier}...</span>
+                    </div>
+                `;
+                
+                sendMessage(state.lastUserMessage, metadata.tier);
+            } else {
+                // Tier 4 tip box
+                feedbackDiv.innerHTML = `
+                    <div style="
+                        margin-top: 12px;
+                        padding: 16px;
+                        background: linear-gradient(135deg, #FFF8E1 0%, #FFECB3 100%);
+                        border-left: 4px solid #FF9800;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 8px rgba(255, 152, 0, 0.1);
+                    ">
+                        <div style="
+                            color: #E65100; 
+                            font-size: 14px; 
+                            font-weight: 600;
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                            margin-bottom: 10px;
+                        ">
+                            <span style="font-size: 18px;">💡</span>
+                            <span>Try asking your question differently</span>
+                        </div>
+                        <div style="
+                            font-size: 13px; 
+                            color: #5D4037; 
+                            line-height: 1.6;
+                        ">
+                            <strong>Tips for better results:</strong><br>
+                            • <strong>Be more specific:</strong> "What is X?" → "How does X work in Y context?"<br>
+                            • <strong>Use different words:</strong> Try synonyms or related terms<br>
+                            • <strong>Break it down:</strong> Ask step-by-step for complex questions
+                        </div>
+                    </div>
+                `;
+            }
+        }
     }
     
-    /**
-     * NEW: Retry with next tier
-     */
-    function retryWithNextTier(metadata, feedbackDiv) {
-        if (state.isProcessing) {
-            console.log('⏸️ Already processing, cannot retry');
+    // ========================================
+    // SEND MESSAGE
+    // ========================================
+    async function sendMessage(message = null, skipTier = 0) {
+        if (state.isProcessing) return;
+        
+        const text = message || elements.chatbotInput.value.trim();
+        if (!text) return;
+        
+        if (text.length > 1000) {
+            showError('Message too long (max 1000 characters)');
             return;
         }
         
-        console.log(`🔄 Retrying with next tier (skipping tier ${metadata.tier})`);
+        state.isProcessing = true;
         
-        // Update UI
-        feedbackDiv.innerHTML = '<span style="color: #2196F3; font-size: 13px;">🔄 Searching another source...</span>';
+        if (!message) {
+            state.lastUserMessage = text;
+            addMessage(text, true);
+            elements.chatbotInput.value = '';
+            elements.chatbotInput.style.height = 'auto';
+            
+            state.conversationContext.push({
+                role: 'user',
+                content: text,
+                timestamp: new Date().toISOString()
+            });
+        }
         
-        // Send retry request with skip_tier
-        if (state.lastUserMessage) {
-            sendMessage(state.lastUserMessage, metadata.tier);
-        } else {
-            console.error('❌ No last user message to retry');
+        elements.chatbotSend.disabled = true;
+        setTyping(true);
+        
+        try {
+            const csrfToken = getCookie('csrftoken') || CONFIG.csrfToken;
+            
+            if (!csrfToken) {
+                throw new Error('CSRF token not found');
+            }
+            
+            const response = await fetch(CONFIG.apiEndpoint, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken,
+                },
+                body: JSON.stringify({
+                    message: text,
+                    skip_tier: skipTier,
+                    history: state.conversationContext.slice(-10)
+                }),
+            });
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
+            }
+            
+            const data = await response.json();
+            setTyping(false);
+            
+            if (data.response) {
+                addMessage(data.response, false, data);
+                
+                state.conversationContext.push({
+                    role: 'assistant',
+                    content: data.response,
+                    tier: data.tier,
+                    tier_name: data.tier_name,
+                    timestamp: new Date().toISOString()
+                });
+                
+                if (state.conversationContext.length > 20) {
+                    state.conversationContext = state.conversationContext.slice(-20);
+                }
+            } else if (data.error) {
+                showError(data.error);
+            }
+            
+        } catch (error) {
+            setTyping(false);
+            
+            let errorMessage = 'Sorry, something went wrong. Please try again.';
+            
+            if (error.message.includes('Failed to fetch')) {
+                errorMessage = 'Network error. Please check your connection.';
+            } else if (error.message.includes('HTTP 500')) {
+                errorMessage = 'Server error. Please try again later.';
+            } else if (error.message.includes('CSRF')) {
+                errorMessage = 'Security error. Please refresh the page.';
+            }
+            
+            showError(errorMessage);
+            
+        } finally {
+            elements.chatbotSend.disabled = false;
+            state.isProcessing = false;
+            elements.chatbotInput.focus();
         }
     }
     
-    /**
-     * Show/Hide typing indicator
-     */
+    // ========================================
+    // UTILITIES
+    // ========================================
     function setTyping(isTyping) {
         if (isTyping) {
-            elements.typingIndicator.classList.add('active');
+            elements.typingIndicator?.classList.add('active');
         } else {
-            elements.typingIndicator.classList.remove('active');
+            elements.typingIndicator?.classList.remove('active');
         }
         scrollToBottom();
     }
     
-    /**
-     * Scroll to bottom of messages
-     */
     function scrollToBottom() {
         if (elements.chatbotMessages) {
             requestAnimationFrame(() => {
@@ -394,36 +604,28 @@
         }
     }
     
-    /**
-     * Escape HTML to prevent XSS
-     */
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML.replace(/\n/g, '<br>');
-    }
-    
-    /**
-     * Show error message
-     */
     function showError(message) {
         const errorDiv = document.createElement('div');
         errorDiv.className = 'error-message';
-        errorDiv.textContent = message || 'Sorry, there was an error processing your message. Please try again.';
+        errorDiv.style.cssText = `
+            background: linear-gradient(135deg, #FFEBEE 0%, #FFCDD2 100%);
+            border-left: 4px solid #f44336;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 4px;
+            color: #c62828;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 2px 8px rgba(244, 67, 54, 0.1);
+        `;
+        errorDiv.textContent = message || 'Sorry, there was an error. Please try again.';
         
-        const typingMessage = elements.typingIndicator.closest('.message');
-        elements.chatbotMessages.insertBefore(errorDiv, typingMessage);
+        elements.chatbotMessages.appendChild(errorDiv);
         scrollToBottom();
         
-        // Auto-remove error after 5 seconds
-        setTimeout(() => {
-            errorDiv.remove();
-        }, 5000);
+        setTimeout(() => errorDiv.remove(), 5000);
     }
     
-    /**
-     * Get CSRF token from cookie
-     */
     function getCookie(name) {
         let cookieValue = null;
         if (document.cookie && document.cookie !== '') {
@@ -439,114 +641,12 @@
         return cookieValue;
     }
     
-    /**
-     * Send message to backend - NEW: With skip_tier support
-     * @param {string} message - Message to send (optional, uses input if not provided)
-     * @param {number} skipTier - Which tier to skip (0 = none, 1 = skip FAQ, 2 = skip FAQ+RAG)
-     */
-    async function sendMessage(message = null, skipTier = 0) {
-        const text = message || elements.chatbotInput.value.trim();
-        
-        // CRITICAL: Check if already processing FIRST
-        if (state.isProcessing) {
-            console.log('⏸️ Already processing a message, ignoring this call');
-            return;
-        }
-        
-        // Check for empty message
-        if (!text) {
-            console.log('⏸️ Empty message, not sending');
-            return;
-        }
-        
-        console.log(`📤 Sending message: "${text}" (skip_tier=${skipTier})`);
-        
-        // LOCK: Set processing state IMMEDIATELY
-        state.isProcessing = true;
-        
-        // Store last user message for retry
-        if (!message) {
-            state.lastUserMessage = text;
-        }
-        
-        // Add user message to UI (only if it's a new message, not a retry)
-        if (!message) {
-            addMessage(text, true);
-        }
-        
-        // Clear input field immediately (only if it's a new message)
-        if (!message) {
-            elements.chatbotInput.value = '';
-            elements.chatbotInput.style.height = 'auto';
-        }
-        
-        // Disable send button
-        elements.chatbotSend.disabled = true;
-        
-        // Show typing indicator
-        setTyping(true);
-        
-        try {
-            // Get CSRF token
-            const csrfToken = getCookie('csrftoken') || CONFIG.csrfToken;
-            
-            // Send request to backend
-            const response = await fetch(CONFIG.apiEndpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken,
-                },
-                body: JSON.stringify({ 
-                    message: text,
-                    skip_tier: skipTier,  // NEW: Tell backend which tier to skip
-                    history: state.messageHistory.slice(-10),
-                }),
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            // Hide typing indicator
-            setTyping(false);
-            
-            // Add bot response with metadata
-            if (data.response) {
-                addMessage(data.response, false, data);
-                console.log(`✅ Response received from Tier ${data.tier || '?'}`);
-            } else if (data.error) {
-                showError(data.error);
-            } else {
-                addMessage('I apologize, but I could not process your request.');
-            }
-            
-        } catch (error) {
-            console.error('❌ Error sending message:', error);
-            setTyping(false);
-            showError();
-        } finally {
-            // UNLOCK: Re-enable everything
-            elements.chatbotSend.disabled = false;
-            state.isProcessing = false;
-            elements.chatbotInput.focus();
-            
-            console.log('✅ Message processing complete, ready for next message');
-        }
-    }
-    
-    /**
-     * Public API
-     */
+    // Public API
     window.NormanChatbot = {
         open: function() {
-            console.log('🔓 Public API: Opening chatbot');
             if (!state.isOpen) toggleChatbot();
         },
         close: function() {
-            console.log('🔒 Public API: Closing chatbot');
             if (state.isOpen) toggleChatbot();
         },
         sendMessage: function(message) {
@@ -555,23 +655,10 @@
                 sendMessage();
             }
         },
-        clearHistory: function() {
-            state.messageHistory = [];
-            console.log('🗑️ Chat history cleared');
-        },
-        getHistory: function() {
-            return [...state.messageHistory];
-        },
         toggle: function() {
-            console.log('🔄 Public API: Toggling chatbot');
             toggleChatbot();
-        },
-        getState: function() {
-            return { ...state };
         }
     };
     
-    // Initialize when script loads
     init();
-    console.log('✅ Chatbot initialization complete with feedback system');
 })();

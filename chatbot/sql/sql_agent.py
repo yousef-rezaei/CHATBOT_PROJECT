@@ -1,8 +1,3 @@
-"""
-SQL Agent - Generates and executes SQL queries on mv_compound_cards
-Cost-optimized with smart prompting
-"""
-
 import os
 import time
 import json
@@ -10,84 +5,108 @@ from django.db import connection
 
 
 class SQLAgent:
-    """
-    Converts natural language questions to SQL queries
-    Executes on mv_compound_cards materialized view
-    """
     
     def __init__(self):
         """Initialize SQL Agent"""
         self.api_key = os.getenv('OPENAI_API_KEY')
-        self.view_name = "mv_compound_cards"  # ← CORRECT TABLE NAME
+        self.view_name = "mv_compound_cards"
         
         # Cost tracking
         self.total_cost = 0.0
         
+        # ✅ FIX: Create OpenAI client instance
         if self.api_key:
+            from openai import OpenAI
+            self.client = OpenAI(api_key=self.api_key)
             print("✅ SQL Agent initialized with LLM")
         else:
+            self.client = None
             print("⚠️ No OpenAI API key - SQL Agent disabled")
     
-    def answer(self, user_question: str):
+    def answer(self, user_message: str) -> dict:
         """
-        Answer question using SQL query generation
+        Answer user question using SQL Agent with pre-check
         
-        Args:
-            user_question: User's natural language question
-            
-        Returns:
-            dict with 'found', 'answer', 'sql_query', 'timing', 'cost'
+        NEW: First checks if question is SQL-relevant before generating query
         """
         start_time = time.time()
         
         print(f"\n{'='*60}")
-        print(f"🤖 SQL Agent Query: {user_question}")
+        print(f"🤖 SQL Agent Query: {user_message}")
         print(f"{'='*60}")
         
-        if not self.api_key:
+        # Check if LLM available
+        if not self.api_key or not self.client:
             return self._no_llm_response()
         
-        # Step 1: Generate SQL query
+        # ========================================
+        # STEP 1: PRE-CHECK IF QUESTION IS SQL-RELEVANT
+        # ========================================
+        is_relevant = self._is_sql_relevant(user_message)
+        
+        if not is_relevant:
+            print("⏭️  Question not relevant to chemical database, skipping SQL generation")
+            return {
+                'found': False,
+                'answer': None,
+                'result_count': 0,
+                'timing': {
+                    'generation_ms': 0,
+                    'execution_ms': 0,
+                    'formatting_ms': 0,
+                    'total_ms': (time.time() - start_time) * 1000
+                },
+                'cost': {
+                    'generation': 0,
+                    'formatting': 0,
+                    'total': 0
+                }
+            }
+        
+        # ========================================
+        # STEP 2: GENERATE SQL QUERY
+        # ========================================
         gen_start = time.time()
-        sql_query = self._generate_sql_query(user_question)
+        sql_query = self._generate_sql_query(user_message)
         gen_time = time.time() - gen_start
-        gen_cost = 0.00015  # Approximate for query generation
+        gen_cost = 0.00025  # Estimated cost for gpt-4o-mini
         
         if not sql_query:
-            print("❌ Failed to generate SQL query")
-            return self._default_llm_response(user_question, gen_cost, gen_time)
+            print("⚠️ Failed to generate SQL query")
+            return self._default_llm_response(user_message, gen_cost, gen_time)
         
-        print(f"✅ Generated SQL query:")
-        print(f"   {sql_query}")
+        print(f"✅ Generated SQL: {sql_query}")
         
-        # Step 2: Execute query
+        # ========================================
+        # STEP 3: EXECUTE SQL QUERY
+        # ========================================
         exec_start = time.time()
         results, error = self._execute_query(sql_query)
         exec_time = time.time() - exec_start
         
         if error:
-            print(f"❌ Query execution failed: {error}")
-            return self._default_llm_response(user_question, gen_cost, gen_time)
+            print(f"⚠️ SQL execution error: {error}")
+            return self._default_llm_response(user_message, gen_cost, gen_time)
         
         if not results:
             print("⚠️ Query returned no results")
             return self._no_results_response(sql_query, gen_cost, gen_time, exec_time)
         
-        print(f"✅ Query returned {len(results)} results")
+        print(f"✅ Found {len(results)} results")
         
-        # Step 3: Format results with LLM
+        # ========================================
+        # STEP 4: FORMAT RESULTS WITH LLM
+        # ========================================
         format_start = time.time()
-        answer = self._format_results_with_llm(user_question, results, sql_query)
+        answer = self._format_results_with_llm(user_message, results, sql_query)
         format_time = time.time() - format_start
-        format_cost = 0.0001  # Approximate for formatting
+        format_cost = 0.00015  # Estimated cost
         
         total_time = time.time() - start_time
         total_cost = gen_cost + format_cost
         
-        print(f"✅ Answer generated")
-        print(f"⏱️  Timing: gen={gen_time*1000:.0f}ms, exec={exec_time*1000:.0f}ms, format={format_time*1000:.0f}ms")
+        print(f"⏱️  Timing: gen={gen_time*1000:.0f}ms, exec={exec_time*1000:.0f}ms, format={format_time*1000:.0f}ms, total={total_time*1000:.0f}ms")
         print(f"💰 Cost: ${total_cost:.6f}")
-        print(f"{'='*60}\n")
         
         return {
             'found': True,
@@ -106,6 +125,65 @@ class SQLAgent:
                 'total': total_cost
             }
         }
+
+    def _is_sql_relevant(self, user_message: str) -> bool:
+        """
+        Check if user question is relevant to chemical database
+        
+        Returns True if question asks about:
+        - Chemical compounds, properties, names
+        - CAS numbers, SMILES, InChIKey
+        - Mass, XLogP, molecular data
+        - Suspect lists, chemical databases
+        
+        Returns False for:
+        - General questions (what is X?)
+        - Authors, publications, papers
+        - Methodology, protocols
+        - Unrelated topics
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a classifier. Determine if a question is about chemical database queries.\n\n"
+                            "Answer YES if question asks about:\n"
+                            "- Chemical compounds, names, properties\n"
+                            "- CAS numbers, SMILES, InChIKey, molecular identifiers\n"
+                            "- Mass, XLogP, molecular weight, chemical properties\n"
+                            "- Suspect lists containing chemicals\n"
+                            "- Database searches for chemicals\n\n"
+                            "Answer NO if question asks about:\n"
+                            "- Authors, researchers, publications\n"
+                            "- Methodology, protocols, procedures\n"
+                            "- General knowledge (what is X?)\n"
+                            "- Platform features, documentation\n"
+                            "- Unrelated topics\n\n"
+                            "Respond with ONLY 'YES' or 'NO'"
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {user_message}\n\nIs this a chemical database query?"
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=5
+            )
+            
+            answer = response.choices[0].message.content.strip().upper()
+            is_relevant = answer == "YES"
+            
+            print(f"📊 SQL Relevance Check: {'✅ RELEVANT' if is_relevant else '❌ NOT RELEVANT'}")
+            
+            return is_relevant
+            
+        except Exception as e:
+            print(f"⚠️ Relevance check failed: {e}, assuming relevant")
+            return True  # Fail-safe: assume relevant if check fails
     
     def _generate_sql_query(self, question: str) -> str:
         """
@@ -113,12 +191,7 @@ class SQLAgent:
         Cost-optimized prompt
         """
         try:
-            from openai import OpenAI
-            
-            client = OpenAI(api_key=self.api_key)
-            
-            # Cost-optimized schema description (only essential fields)
-            # IMPORTANT: Table name is mv_compound_cards
+            # Use instance client instead of creating new one
             schema = """
 mv_compound_cards materialized view has these ESSENTIAL columns:
 
@@ -147,7 +220,6 @@ mv_compound_cards materialized view has these ESSENTIAL columns:
 - name_is_clean (boolean): Name has only letters/spaces/hyphens
 """
             
-            # Cost-optimized prompt (concise, clear instructions)
             prompt = f"""{schema}
 
 User question: "{question}"
@@ -175,14 +247,14 @@ Now generate SQL for: "{question}"
 
 SQL:"""
             
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a PostgreSQL expert. Generate only valid SQL queries."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.0,  # Deterministic
-                max_tokens=150  # Short query only
+                temperature=0.0,
+                max_tokens=150
             )
             
             sql = response.choices[0].message.content.strip()
@@ -239,14 +311,8 @@ SQL:"""
         Cost-optimized
         """
         try:
-            from openai import OpenAI
-            
-            client = OpenAI(api_key=self.api_key)
-            
-            # Limit results to save tokens
+            # Use instance client
             limited_results = results[:5]
-            
-            # Format results concisely
             results_text = json.dumps(limited_results, indent=2, default=str)[:1000]
             
             prompt = f"""Question: "{question}"
@@ -263,21 +329,20 @@ Provide a concise, natural language answer. Include:
 
 Keep it under 150 words."""
             
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a helpful chemical database assistant."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
-                max_tokens=200  # Concise answer
+                max_tokens=200
             )
             
             return response.choices[0].message.content.strip()
             
         except Exception as e:
             print(f"⚠️ Formatting error: {e}")
-            # Fallback to simple formatting
             return self._format_results_simple(results)
     
     def _format_results_simple(self, results: list) -> str:
@@ -329,10 +394,7 @@ Keep it under 150 words."""
         Direct answer without database
         """
         try:
-            from openai import OpenAI
-            
-            client = OpenAI(api_key=self.api_key)
-            
+            # Use instance client
             prompt = f"""The user asked: "{question}"
 
 This is about the NORMAN chemical database, but I couldn't generate a database query.
@@ -342,7 +404,7 @@ Provide a brief, helpful response:
 - If it's about the database, explain you need more specific details
 - Keep it under 100 words"""
             
-            response = client.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a helpful chemistry assistant."},
