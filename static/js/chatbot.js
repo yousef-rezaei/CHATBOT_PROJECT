@@ -1,10 +1,3 @@
-/**
- * NORMAN SLE Chatbot - FINAL COMPLETE VERSION
- * ✅ All messages with avatars (NS or U)
- * ✅ Gradient feedback buttons with text
- * ✅ Category navigation
- * ✅ No duplicate code
- */
 (function() {
     'use strict';
     
@@ -76,48 +69,55 @@
             elements.chatbotInput.addEventListener('keydown', handleInputKeydown);
         }
         
-        if (elements.chatbotSend) {
-            elements.chatbotSend.addEventListener('click', async function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                await sendMessage();
-            });
-        }
+      // Make sure send button uses showFeedback=true
+if (elements.chatbotSend) {
+    elements.chatbotSend.addEventListener('click', async function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        await sendMessage(0, true);  // ← true = show feedback for typed messages
+    });
+}
         
         if (elements.backButton) {
             elements.backButton.addEventListener('click', showCategories);
         }
         
         // Dynamic quick action buttons (from HTML, not categories)
-        document.querySelectorAll('.quick-action-btn').forEach(btn => {
-            if (!btn.dataset.listenerAttached) {
-                btn.dataset.listenerAttached = 'true';
-                btn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!state.isProcessing) {
-                        const message = this.getAttribute('data-message');
-                        if (message) {
-                            handleQuickAction(message);
-                        }
-                    }
-                });
+       // NEW CODE - Pass showFeedback=false for quick actions
+document.querySelectorAll('.quick-action-btn').forEach(btn => {
+    if (!btn.dataset.listenerAttached) {
+        btn.dataset.listenerAttached = 'true';
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!state.isProcessing) {
+                const message = this.getAttribute('data-message');
+                if (message) {
+                    handleQuickAction(message, false);  // ← false = no feedback
+                }
             }
         });
     }
+});
+    }
     
-    function handleInputKeydown(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
+   function handleInputKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!state.isProcessing) {
+            sendMessage(0, true);  // ← true = show feedback for typed messages
         }
     }
+}
     
-    function handleQuickAction(message) {
-        if (!message || state.isProcessing) return;
-        elements.chatbotInput.value = message;
-        sendMessage();
+ // NEW CODE - Add showFeedback parameter
+function handleQuickAction(message, showFeedback = false) {
+    const input = elements.chatbotInput;
+    if (input) {
+        input.value = message;
+        sendMessage(0, showFeedback);  // skipTier=0, showFeedback=false for buttons
     }
+}
     
     function toggleChatbot() {
         state.isOpen = !state.isOpen;
@@ -197,35 +197,36 @@
         elements.backButton.style.display = 'none';
     }
     
-    function handleQuestionClick(question) {
-        // Add user message
-        addMessage(question, true);
-        
-        // Show typing
-        setTyping(true);
-        
-        // Send to backend
-        fetch(CONFIG.apiEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRFToken': CONFIG.csrfToken
-            },
-            body: JSON.stringify({ message: question })
-        })
-        .then(response => response.json())
-        .then(data => {
-            setTyping(false);
-            addMessage(data.response, false, data);
-            setTimeout(showCategories, 500);
-        })
-        .catch(error => {
-            setTyping(false);
-            addMessage('Sorry, I encountered an error. Please try again.', false);
-            setTimeout(showCategories, 500);
-        });
-    }
+   // NEW CODE - No feedback for category questions
+function handleQuestionClick(question) {
+    // Add user message
+    addMessage(question, true);
     
+    // Show typing
+    setTyping(true);
+    
+    // Send to backend
+    fetch(CONFIG.apiEndpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CONFIG.csrfToken
+        },
+        body: JSON.stringify({ message: question })
+    })
+    .then(response => response.json())
+    .then(data => {
+        setTyping(false);
+        // ✅ FIXED: Pass null instead of data to hide feedback buttons
+        addMessage(data.response, false, null);  // ← No feedback for quick actions
+        setTimeout(showCategories, 500);
+    })
+    .catch(error => {
+        setTyping(false);
+        addMessage('Sorry, I encountered an error. Please try again.', false);
+        setTimeout(showCategories, 500);
+    });
+}
     // ========================================
     // MESSAGE HANDLING - WITH AVATARS (NS/U)
     // ========================================
@@ -336,7 +337,7 @@
                 background: linear-gradient(135deg, #ffffff 0%, #e3f2fd 100%);
                 color: #2196F3;
                 cursor: pointer;
-                font-size: 13px;
+                font-size: 11px;
                 font-weight: 500;
                 transition: all 0.2s ease;
                 box-shadow: 0 2px 4px rgba(33, 150, 243, 0.1);
@@ -443,13 +444,18 @@
                         <span>Searching ${metadata.next_tier}...</span>
                     </div>
                 `;
-                
-                sendMessage(state.lastUserMessage, metadata.tier);
+                // ✅ FIX: Set input value before sending
+            setTimeout(() => {
+                elements.chatbotInput.value = state.lastUserMessage;
+                sendMessage(metadata.tier, true);  // skipTier, showFeedback
+            }, 500);
+                // sendMessage(state.lastUserMessage, metadata.tier);
             } else {
                 // Tier 4 tip box
                 feedbackDiv.innerHTML = `
                     <div style="
                         margin-top: 12px;
+                        margin-bottom: 10px;
                         padding: 16px;
                         background: linear-gradient(135deg, #FFF8E1 0%, #FFECB3 100%);
                         border-left: 4px solid #FF9800;
@@ -487,102 +493,104 @@
     // ========================================
     // SEND MESSAGE
     // ========================================
-    async function sendMessage(message = null, skipTier = 0) {
-        if (state.isProcessing) return;
-        
-        const text = message || elements.chatbotInput.value.trim();
-        if (!text) return;
-        
-        if (text.length > 1000) {
-            showError('Message too long (max 1000 characters)');
-            return;
-        }
-        
-        state.isProcessing = true;
-        
-        if (!message) {
-            state.lastUserMessage = text;
-            addMessage(text, true);
-            elements.chatbotInput.value = '';
-            elements.chatbotInput.style.height = 'auto';
-            
-            state.conversationContext.push({
-                role: 'user',
-                content: text,
-                timestamp: new Date().toISOString()
-            });
-        }
-        
-        elements.chatbotSend.disabled = true;
-        setTyping(true);
-        
-        try {
-            const csrfToken = getCookie('csrftoken') || CONFIG.csrfToken;
-            
-            if (!csrfToken) {
-                throw new Error('CSRF token not found');
-            }
-            
-            const response = await fetch(CONFIG.apiEndpoint, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRFToken': csrfToken,
-                },
-                body: JSON.stringify({
-                    message: text,
-                    skip_tier: skipTier,
-                    history: state.conversationContext.slice(-10)
-                }),
-            });
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`HTTP ${response.status}: ${errorText}`);
-            }
-            
-            const data = await response.json();
-            setTyping(false);
-            
-            if (data.response) {
-                addMessage(data.response, false, data);
-                
-                state.conversationContext.push({
-                    role: 'assistant',
-                    content: data.response,
-                    tier: data.tier,
-                    tier_name: data.tier_name,
-                    timestamp: new Date().toISOString()
-                });
-                
-                if (state.conversationContext.length > 20) {
-                    state.conversationContext = state.conversationContext.slice(-20);
-                }
-            } else if (data.error) {
-                showError(data.error);
-            }
-            
-        } catch (error) {
-            setTyping(false);
-            
-            let errorMessage = 'Sorry, something went wrong. Please try again.';
-            
-            if (error.message.includes('Failed to fetch')) {
-                errorMessage = 'Network error. Please check your connection.';
-            } else if (error.message.includes('HTTP 500')) {
-                errorMessage = 'Server error. Please try again later.';
-            } else if (error.message.includes('CSRF')) {
-                errorMessage = 'Security error. Please refresh the page.';
-            }
-            
-            showError(errorMessage);
-            
-        } finally {
-            elements.chatbotSend.disabled = false;
-            state.isProcessing = false;
-            elements.chatbotInput.focus();
-        }
+   // NEW CODE - Add showFeedback parameter
+async function sendMessage(skipTier = 0, showFeedback = true) {
+    const input = elements.chatbotInput;
+    if (!input) return;
+    
+    const message = input.value.trim();
+    
+    // Validate
+    if (!message) {
+        console.log('Empty message');
+        return;
     }
+    
+    if (message.length > 1000) {
+        addMessage('⚠️ Message too long (max 1000 characters)', false);
+        return;
+    }
+    
+    if (state.isProcessing) {
+        console.log('Already processing...');
+        return;
+    }
+    
+    // Set processing state
+    state.isProcessing = true;
+    state.lastUserMessage = message;
+    
+    // Clear input
+    input.value = '';
+    autoResizeTextarea();
+    
+    // Add user message
+    addMessage(message, true);
+    
+    // Show typing
+    setTyping(true);
+    
+    try {
+        const response = await fetch(CONFIG.apiEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CONFIG.csrfToken
+            },
+            body: JSON.stringify({
+                message: message,
+                skip_tier: skipTier
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Hide typing
+        setTyping(false);
+        
+        // Add bot response WITH or WITHOUT feedback based on showFeedback parameter
+        if (showFeedback && data.tier) {
+            // Normal message with feedback buttons
+            addMessage(data.response, false, data);
+        } else {
+            // Quick action - no feedback buttons
+            addMessage(data.response, false, null);  // null = no metadata = no feedback
+        }
+        
+        // Update context
+        state.conversationContext.push({
+            role: 'user',
+            content: message,
+            timestamp: new Date().toISOString()
+        });
+        
+        state.conversationContext.push({
+            role: 'assistant',
+            content: data.response,
+            tier: data.tier,
+            timestamp: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Error:', error);
+        setTyping(false);
+        
+        let errorMsg = 'Sorry, I encountered an error. Please try again.';
+        if (error.message.includes('Failed to fetch')) {
+            errorMsg = '⚠️ Network error. Please check your connection.';
+        } else if (error.message.includes('403')) {
+            errorMsg = '⚠️ Session expired. Please refresh the page.';
+        }
+        
+        addMessage(errorMsg, false);
+    } finally {
+        state.isProcessing = false;
+    }
+}
     
     // ========================================
     // UTILITIES
