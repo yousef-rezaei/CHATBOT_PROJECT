@@ -1,8 +1,3 @@
-"""
-Simple FAQ Handler with DUAL EMBEDDINGS
-Embeds both button_label AND full question for maximum coverage
-"""
-
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -11,19 +6,10 @@ import os
 
 
 class SimpleFAQHandler:
-    """
-    FAQ matching with dual embeddings
-    Each FAQ has TWO embeddings: button_label + full question
-    """
+
     
     def __init__(self, csv_path: str, cache_dir: str = 'cache'):
-        """
-        Initialize FAQ handler with dual embeddings
         
-        Args:
-            csv_path: Path to FAQ CSV file
-            cache_dir: Directory for caching embeddings
-        """
         self.csv_path = csv_path
         self.cache_dir = cache_dir
         self.embeddings_file = os.path.join(cache_dir, 'faq_embeddings_dual.npy')
@@ -32,7 +18,7 @@ class SimpleFAQHandler:
         print("🔄 Loading FAQ Handler...")
         
         # Load model
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.model = SentenceTransformer('BAAI/bge-small-en-v1.5')
         print("✅ Model loaded")
         
         # Load FAQs and embeddings

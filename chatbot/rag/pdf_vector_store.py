@@ -1,7 +1,3 @@
-"""
-PDF Vector Store - Embeds PDF documents for semantic search
-"""
-
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -16,28 +12,19 @@ except ImportError:
 
 
 class PDFVectorStore:
-    """
-    Stores and searches PDF document chunks using embeddings
-    """
-    
+     
     def __init__(self, cache_dir='cache/pdf_rag'):
         self.cache_dir = cache_dir
         self.embeddings_file = os.path.join(cache_dir, 'pdf_embeddings.npy')
         self.metadata_file = os.path.join(cache_dir, 'pdf_metadata.pkl')
         
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
+        self.model = SentenceTransformer('BAAI/bge-base-en-v1.5')
         
         self.embeddings = None
         self.chunks = []  # List of {text, source, page, chunk_id}
     
     def build_from_pdfs(self, pdf_folder: str, chunk_size: int = 500):
-        """
-        Build vector store from PDF files in a folder
-        
-        Args:
-            pdf_folder: Path to folder containing PDF files
-            chunk_size: Size of text chunks (in characters)
-        """
+      
         print(f"🔄 Building PDF vector store from: {pdf_folder}")
         
         pdf_files = list(Path(pdf_folder).glob('*.pdf'))
@@ -149,16 +136,7 @@ class PDFVectorStore:
         print("💾 PDF embeddings cached")
     
     def search(self, query: str, top_k: int = 3):
-        """
-        Search for relevant PDF chunks
-        
-        Args:
-            query: User's search query
-            top_k: Number of results to return
-            
-        Returns:
-            List of {chunk, similarity} dicts
-        """
+     
         if self.embeddings is None:
             raise ValueError("PDF vector store not initialized")
         
