@@ -20,18 +20,30 @@ def home(request):
     """Render the home page with chatbot widget"""
     return render(request, 'chatbot/index.html', {})
 
+import json
+import time
+import os
+from datetime import datetime
+from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
+# from django.views.decorators.csrf import csrf_exempt
+
+# Import your handlers
+# from chatbot.faq.faq_handler import get_faq_handler
+# from chatbot.pdf_rag.pdf_rag_handler import get_pdf_rag_handler
+from chatbot.sql.sql_agent import get_sql_agent
+
+FAQ_CSV_PATH = 'chatbot/faq/data/chatbot_faq.csv'
+
+
+def get_categories_api():
+    """Return FAQ categories for frontend"""
+    # Your existing get_categories_api code
+    pass
+
 
 @require_http_methods(["GET", "POST"])
 def chatbot_api(request):
-    """
-    4-Tier Chatbot with Feedback on ALL responses
-    
-    Flow:
-    1. FAQ → Show feedback → If NO → Try PDF RAG
-    2. PDF RAG → Show feedback → If NO → Try SQL
-    3. SQL → Show feedback → If NO → Try LLM
-    4. LLM → Show feedback (no retry available)
-    """
     
     if request.method == "GET":
         action = request.GET.get('action', '')
@@ -42,6 +54,9 @@ def chatbot_api(request):
     # POST - Handle user questions
     request_start = time.time()
     faq_time = 0
+    
+    # ✅ NEW: Track tier attempts
+    tier_attempts = []
     
     try:
         data = json.loads(request.body)
@@ -62,6 +77,15 @@ def chatbot_api(request):
         # TIER 1: FAQ HANDLER
         # ============================================================
         if skip_tier < 1:
+            # ✅ Track attempt
+            tier_attempts.append({
+                'tier': 1,
+                'tier_name': 'FAQ',
+                'status': 'searching',
+                'message': 'Searching FAQ...',
+                'icon': '🔍'
+            })
+            
             faq_start = time.time()
             faq_handler = get_faq_handler(FAQ_CSV_PATH)
             
@@ -72,6 +96,10 @@ def chatbot_api(request):
                 if faq_result['found']:
                     total_time = time.time() - request_start
                     
+                    # ✅ Mark as success
+                    tier_attempts[-1]['status'] = 'success'
+                    tier_attempts[-1]['message'] = 'Found in FAQ'
+                    
                     print(f"✅ TIER 1 (FAQ): Match found (similarity: {faq_result['similarity']:.3f})")
                     
                     return JsonResponse({
@@ -81,8 +109,9 @@ def chatbot_api(request):
                         'tier_name': 'FAQ',
                         'similarity': faq_result['similarity'],
                         'confidence': faq_result['confidence'],
-                        'can_retry': True,  # ✅ SHOW FEEDBACK
+                        'can_retry': True,
                         'next_tier': 'PDF Documents',
+                        'tier_attempts': tier_attempts,  # ✅ Send progress
                         'timing': {
                             'faq_ms': faq_time * 1000,
                             'total_ms': total_time * 1000
@@ -93,12 +122,25 @@ def chatbot_api(request):
                         'timestamp': datetime.now().isoformat()
                     })
                 else:
+                    # ✅ Mark as not found
+                    tier_attempts[-1]['status'] = 'not_found'
+                    tier_attempts[-1]['message'] = 'Not found in FAQ'
+                    
                     print(f"⏭️ TIER 1 (FAQ): No match (best: {faq_result.get('similarity', 0):.3f})")
         
         # ============================================================
         # TIER 2: PDF RAG HANDLER
         # ============================================================
         if skip_tier < 2:
+            # ✅ Track attempt
+            tier_attempts.append({
+                'tier': 2,
+                'tier_name': 'PDF Documents',
+                'status': 'searching',
+                'message': 'Scanning documents...',
+                'icon': '📚'
+            })
+            
             print(f"📚 Trying TIER 2: PDF RAG...")
             
             try:
@@ -111,6 +153,10 @@ def chatbot_api(request):
                 if rag_result['found']:
                     total_time = time.time() - request_start
                     
+                    # ✅ Mark as success
+                    tier_attempts[-1]['status'] = 'success'
+                    tier_attempts[-1]['message'] = 'Found in documents'
+                    
                     print(f"✅ TIER 2 (PDF RAG): Answer generated (similarity: {rag_result.get('top_similarity', 0):.3f})")
                     
                     return JsonResponse({
@@ -121,8 +167,9 @@ def chatbot_api(request):
                         'sources': rag_result.get('sources', [])[:3],
                         'similarity': rag_result.get('top_similarity', 0),
                         'answer_method': rag_result.get('answer_method', 'template'),
-                        'can_retry': True,  # ✅ SHOW FEEDBACK
+                        'can_retry': True,
                         'next_tier': 'Chemical Database',
+                        'tier_attempts': tier_attempts,  # ✅ Send progress
                         'timing': {
                             'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
                             'rag_search_ms': rag_result['timing']['search_ms'],
@@ -137,15 +184,32 @@ def chatbot_api(request):
                         'timestamp': datetime.now().isoformat()
                     })
                 else:
+                    # ✅ Mark as not found
+                    tier_attempts[-1]['status'] = 'not_found'
+                    tier_attempts[-1]['message'] = 'Not found in documents'
+                    
                     print(f"⏭️ TIER 2 (PDF RAG): No match (best: {rag_result.get('top_similarity', 0):.3f})")
                     
             except Exception as e:
+                # ✅ Mark as error
+                tier_attempts[-1]['status'] = 'error'
+                tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
+                
                 print(f"❌ TIER 2 (PDF RAG): Error - {e}")
         
         # ============================================================
         # TIER 3: SQL AGENT
         # ============================================================
         if skip_tier < 3:
+            # ✅ Track attempt
+            tier_attempts.append({
+                'tier': 3,
+                'tier_name': 'Chemical Database',
+                'status': 'searching',
+                'message': 'Querying database...',
+                'icon': '🗄️'
+            })
+            
             print(f"🗄️ Trying TIER 3: SQL Agent...")
             
             try:
@@ -155,12 +219,15 @@ def chatbot_api(request):
                 sql_result = sql_agent.answer(user_message)
                 sql_time = time.time() - sql_start
                 
-                # Check if sql_result is valid
                 if sql_result and isinstance(sql_result, dict):
                     has_results = sql_result.get('result_count', 0) > 0
                     
                     if has_results:
                         total_time = time.time() - request_start
+                        
+                        # ✅ Mark as success
+                        tier_attempts[-1]['status'] = 'success'
+                        tier_attempts[-1]['message'] = f'Found {sql_result.get("result_count", 0)} results'
                         
                         print(f"✅ TIER 3 (SQL): {sql_result.get('result_count', 0)} results found")
                         
@@ -171,8 +238,9 @@ def chatbot_api(request):
                             'tier_name': 'Chemical Database',
                             'sql_query': sql_result.get('sql_query'),
                             'result_count': sql_result.get('result_count', 0),
-                            'can_retry': True,  # ✅ SHOW FEEDBACK
+                            'can_retry': True,
                             'next_tier': 'AI Assistant',
+                            'tier_attempts': tier_attempts,  # ✅ Send progress
                             'timing': {
                                 'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
                                 'sql_generation_ms': sql_result['timing']['generation_ms'],
@@ -189,16 +257,37 @@ def chatbot_api(request):
                             'timestamp': datetime.now().isoformat()
                         })
                     else:
+                        # ✅ Mark as not found
+                        tier_attempts[-1]['status'] = 'not_found'
+                        tier_attempts[-1]['message'] = 'Query not relevant for database'
+                        
                         print(f"⏭️ TIER 3 (SQL): No results returned")
                 else:
+                    # ✅ Mark as invalid
+                    tier_attempts[-1]['status'] = 'not_found'
+                    tier_attempts[-1]['message'] = 'Invalid result'
+                    
                     print(f"⏭️ TIER 3 (SQL): Invalid result - {sql_result}")
                     
             except Exception as e:
+                # ✅ Mark as error
+                tier_attempts[-1]['status'] = 'error'
+                tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
+                
                 print(f"❌ TIER 3 (SQL): Error - {e}")
         
         # ============================================================
-        # TIER 4: LLM FALLBACK (FINAL TIER - NO MORE RETRY)
+        # TIER 4: LLM FALLBACK (FINAL TIER)
         # ============================================================
+        # ✅ Track attempt
+        tier_attempts.append({
+            'tier': 4,
+            'tier_name': 'AI Assistant',
+            'status': 'searching',
+            'message': 'Generating answer...',
+            'icon': '🤖'
+        })
+        
         print(f"🤖 Trying TIER 4: LLM Fallback...")
         
         try:
@@ -239,6 +328,10 @@ def chatbot_api(request):
             llm_time = time.time() - llm_start
             total_time = time.time() - request_start
             
+            # ✅ Mark as success
+            tier_attempts[-1]['status'] = 'success'
+            tier_attempts[-1]['message'] = 'Generated response'
+            
             print(f"✅ TIER 4 (LLM): Response generated (cost: ${cost:.6f})")
             
             return JsonResponse({
@@ -246,8 +339,9 @@ def chatbot_api(request):
                 'type': 'llm_fallback',
                 'tier': 4,
                 'tier_name': 'AI Assistant',
-                'can_retry': False,  # ❌ NO MORE TIERS - SHOW FEEDBACK BUT NO RETRY
+                'can_retry': False,
                 'next_tier': None,
+                'tier_attempts': tier_attempts,  # ✅ Send progress
                 'timing': {
                     'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
                     'llm_ms': llm_time * 1000,
@@ -261,10 +355,14 @@ def chatbot_api(request):
             })
             
         except Exception as e:
+            # ✅ Mark as error
+            tier_attempts[-1]['status'] = 'error'
+            tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
+            
             print(f"❌ TIER 4 (LLM): Error - {e}")
             
             # ============================================================
-            # ABSOLUTE FALLBACK (IF EVEN LLM FAILS)
+            # ABSOLUTE FALLBACK
             # ============================================================
             total_time = time.time() - request_start
             
@@ -281,6 +379,7 @@ def chatbot_api(request):
                 'tier_name': 'Error',
                 'can_retry': False,
                 'next_tier': None,
+                'tier_attempts': tier_attempts,  # ✅ Send progress
                 'timing': {
                     'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
                     'total_ms': total_time * 1000
@@ -298,7 +397,6 @@ def chatbot_api(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({'error': 'Error processing message'}, status=500)
-
 
 def get_categories_api():
     """Return FAQ categories with icons from CSV"""

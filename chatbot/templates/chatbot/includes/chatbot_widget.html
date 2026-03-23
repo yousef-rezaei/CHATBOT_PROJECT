@@ -1,5 +1,5 @@
 {% load static %}
-<!-- NORMAN SLE Chatbot Widget - Clean Version -->
+<!-- NORMAN SLE Chatbot Widget - FIXED -->
 
 <link rel="stylesheet" href="{% static 'css/chatbot.css' %}">
 
@@ -39,7 +39,7 @@
 
     <!-- Messages Area -->
     <div class="chatbot-messages" id="chatbotMessages">
-        <!-- Welcome Message - WITH AVATAR -->
+        <!-- Welcome Message -->
         <div class="message bot">
             <div class="message-avatar">NS</div>
             <div class="message-content">
@@ -50,7 +50,7 @@
             </div>
         </div>
 
-        <!-- Tip Message - WITH AVATAR -->
+        <!-- Tip Message -->
         <div class="message bot">
             <div class="message-avatar">NS</div>
             <div class="message-content">
@@ -60,16 +60,16 @@
                 </div>
             </div>
         </div>
+    </div>  <!-- ✅ End of chatbot-messages -->
 
-        <!-- Typing Indicator - WITH AVATAR -->
-        <div class="message bot">
-            
-            <div class="typing-indicator" id="typingIndicator">
-                <span class="typing-dot"></span>
-                <span class="typing-dot"></span>
-                <span class="typing-dot"></span>
-            </div>
+    <!-- ✅ FIXED: Typing Indicator (OUTSIDE messages area) -->
+    <div class="typing-indicator" id="typingIndicator" style="display: none;">
+        <div class="hexagon-spinner">
+            <div class="hex hex1"></div>
+            <div class="hex hex2"></div>
+            <div class="hex hex3"></div>
         </div>
+        <span class="loading-text">Thinking...</span>
     </div>
 
     <!-- Quick Actions -->

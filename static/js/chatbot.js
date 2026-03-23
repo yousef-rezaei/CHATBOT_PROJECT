@@ -440,11 +440,13 @@ function handleQuestionClick(question) {
                         gap: 6px;
                         padding: 8px 0;
                     ">
-                        <span style="font-size: 16px;">🔄</span>
-                        <span>Searching ${metadata.next_tier}...</span>
+                     
                     </div>
                 `;
-                // ✅ FIX: Set input value before sending
+            
+               // Show loading for next tier
+            setTyping(true, metadata.tier + 1);  // ← Add this line
+            // ✅ FIX: Set input value before sending
             setTimeout(() => {
                 elements.chatbotInput.value = state.lastUserMessage;
                 sendMessage(metadata.tier, true);  // skipTier, showFeedback
@@ -528,7 +530,8 @@ async function sendMessage(skipTier = 0, showFeedback = true) {
     addMessage(message, true);
     
     // Show typing
-    setTyping(true);
+    // setTyping(true);
+    setTyping(true, skipTier + 1);  // +1 because skipTier=0 means Tier 1
     
     try {
         const response = await fetch(CONFIG.apiEndpoint, {
@@ -548,7 +551,11 @@ async function sendMessage(skipTier = 0, showFeedback = true) {
         }
         
         const data = await response.json();
-        
+           // ✅ SHOW TIER PROGRESS
+        if (data.tier_attempts && data.tier_attempts.length > 1) {
+            await showTierProgress(data.tier_attempts);
+        }
+
         // Hide typing
         setTyping(false);
         
@@ -595,14 +602,123 @@ async function sendMessage(skipTier = 0, showFeedback = true) {
     // ========================================
     // UTILITIES
     // ========================================
-    function setTyping(isTyping) {
-        if (isTyping) {
-            elements.typingIndicator?.classList.add('active');
-        } else {
-            elements.typingIndicator?.classList.remove('active');
+
+// ✅ NEW FUNCTION: Show tier progress
+async function showTierProgress(tierAttempts) {
+    console.log('📊 Tier progress:', tierAttempts);
+    
+    for (let i = 0; i < tierAttempts.length - 1; i++) {
+        const attempt = tierAttempts[i];
+        
+        // Update loading text for this tier
+        setTyping(true, attempt.tier);
+        
+        // Wait to show tier being searched (simulate realistic timing)
+        await new Promise(resolve => setTimeout(resolve, 600));
+        
+        // Show status message if not found
+        if (attempt.status === 'not_found') {
+            addTierStatusMessage(
+                `${attempt.icon} ${attempt.tier_name}: ${attempt.message}`,
+                'info'
+            );
+            
+            // Brief pause before next tier
+            await new Promise(resolve => setTimeout(resolve, 300));
+        } else if (attempt.status === 'error') {
+            addTierStatusMessage(
+                `${attempt.icon} ${attempt.tier_name}: ${attempt.message}`,
+                'warning'
+            );
+            
+            await new Promise(resolve => setTimeout(resolve, 300));
         }
-        scrollToBottom();
     }
+}
+
+// ✅ NEW FUNCTION: Add tier status messages
+function addTierStatusMessage(message, type = 'info') {
+    const messagesContainer = elements.chatbotMessages;
+    if (!messagesContainer) return;
+    
+    const statusDiv = document.createElement('div');
+    statusDiv.className = `tier-status tier-status-${type}`;
+    
+    // Style based on type
+    let borderColor = '#2196F3';
+    let bgColor = '#e3f2fd';
+    
+    if (type === 'warning') {
+        borderColor = '#FF9800';
+        bgColor = '#fff3e0';
+    } else if (type === 'success') {
+        borderColor = '#4CAF50';
+        bgColor = '#f1f8f4';
+    }
+    
+    statusDiv.style.cssText = `
+        padding: 8px 12px;
+        margin: 4px 0;
+        border-radius: 8px;
+        font-size: 12px;
+        color: #666;
+        background: ${bgColor};
+        border-left: 3px solid ${borderColor};
+        animation: fadeInSlide 0.3s ease-out;
+    `;
+    statusDiv.textContent = message;
+    
+    messagesContainer.appendChild(statusDiv);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+    // Auto-remove after a few seconds
+    setTimeout(() => {
+        statusDiv.style.opacity = '0';
+        statusDiv.style.transition = 'opacity 0.5s';
+        setTimeout(() => statusDiv.remove(), 500);
+    }, 2500);
+}
+
+
+
+function setTyping(isTyping, tier = null) {
+    const typingIndicator = elements.typingIndicator;
+    const loadingText = typingIndicator?.querySelector('.loading-text');
+    
+    if (!typingIndicator) return;
+    
+    if (isTyping) {
+        // Dynamic text based on tier
+        let text = 'Thinking...';
+        
+        if (tier === 1) {
+            text = '🔍 Searching FAQ...';
+        } else if (tier === 2) {
+            text = '📚 Scanning documents...';
+        } else if (tier === 3) {
+            text = '🗄️ Querying database...';
+        } else if (tier === 4) {
+            text = '🤖 Generating answer...';
+        }
+        
+        if (loadingText) {
+            loadingText.textContent = text;
+        }
+        
+        typingIndicator.style.display = 'flex';
+        typingIndicator.classList.add('active');
+        
+        // Scroll to show loading
+        setTimeout(() => {
+            if (elements.chatbotMessages) {
+                elements.chatbotMessages.scrollTop = elements.chatbotMessages.scrollHeight;
+            }
+        }, 100);
+    } else {
+        typingIndicator.style.display = 'none';
+        typingIndicator.classList.remove('active');
+    }
+}
     
     function scrollToBottom() {
         if (elements.chatbotMessages) {
