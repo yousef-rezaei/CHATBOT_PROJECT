@@ -2,198 +2,34 @@ import os
 import time
 import json
 from django.db import connection
+from openai import OpenAI
 
 
 class SQLAgent:
     
     def __init__(self):
-        """Initialize SQL Agent"""
+        """Initialize SQL Agent with Smart SQL features"""
         self.api_key = os.getenv('OPENAI_API_KEY')
         self.view_name = "mv_compound_cards"
         
         # Cost tracking
         self.total_cost = 0.0
         
-        # ✅ FIX: Create OpenAI client instance
+        # Database schema for LLM context
+        self.schema = self._get_schema()
+        
+        # Initialize OpenAI client
         if self.api_key:
-            from openai import OpenAI
             self.client = OpenAI(api_key=self.api_key)
-            print("✅ SQL Agent initialized with LLM")
+            print("✅ SQL Agent initialized with Smart SQL")
         else:
             self.client = None
             print("⚠️ No OpenAI API key - SQL Agent disabled")
     
-    def answer(self, user_message: str) -> dict:
-        """
-        Answer user question using SQL Agent with pre-check
-        
-        NEW: First checks if question is SQL-relevant before generating query
-        """
-        start_time = time.time()
-        
-        print(f"\n{'='*60}")
-        print(f"🤖 SQL Agent Query: {user_message}")
-        print(f"{'='*60}")
-        
-        # Check if LLM available
-        if not self.api_key or not self.client:
-            return self._no_llm_response()
-        
-        # ========================================
-        # STEP 1: PRE-CHECK IF QUESTION IS SQL-RELEVANT
-        # ========================================
-        is_relevant = self._is_sql_relevant(user_message)
-        
-        if not is_relevant:
-            print("⏭️  Question not relevant to chemical database, skipping SQL generation")
-            return {
-                'found': False,
-                'answer': None,
-                'result_count': 0,
-                'timing': {
-                    'generation_ms': 0,
-                    'execution_ms': 0,
-                    'formatting_ms': 0,
-                    'total_ms': (time.time() - start_time) * 1000
-                },
-                'cost': {
-                    'generation': 0,
-                    'formatting': 0,
-                    'total': 0
-                }
-            }
-        
-        # ========================================
-        # STEP 2: GENERATE SQL QUERY
-        # ========================================
-        gen_start = time.time()
-        sql_query = self._generate_sql_query(user_message)
-        gen_time = time.time() - gen_start
-        gen_cost = 0.00025  # Estimated cost for gpt-4o-mini
-        
-        if not sql_query:
-            print("⚠️ Failed to generate SQL query")
-            return self._default_llm_response(user_message, gen_cost, gen_time)
-        
-        print(f"✅ Generated SQL: {sql_query}")
-        
-        # ========================================
-        # STEP 3: EXECUTE SQL QUERY
-        # ========================================
-        exec_start = time.time()
-        results, error = self._execute_query(sql_query)
-        exec_time = time.time() - exec_start
-        
-        if error:
-            print(f"⚠️ SQL execution error: {error}")
-            return self._default_llm_response(user_message, gen_cost, gen_time)
-        
-        if not results:
-            print("⚠️ Query returned no results")
-            return self._no_results_response(sql_query, gen_cost, gen_time, exec_time)
-        
-        print(f"✅ Found {len(results)} results")
-        
-        # ========================================
-        # STEP 4: FORMAT RESULTS WITH LLM
-        # ========================================
-        format_start = time.time()
-        answer = self._format_results_with_llm(user_message, results, sql_query)
-        format_time = time.time() - format_start
-        format_cost = 0.00015  # Estimated cost
-        
-        total_time = time.time() - start_time
-        total_cost = gen_cost + format_cost
-        
-        print(f"⏱️  Timing: gen={gen_time*1000:.0f}ms, exec={exec_time*1000:.0f}ms, format={format_time*1000:.0f}ms, total={total_time*1000:.0f}ms")
-        print(f"💰 Cost: ${total_cost:.6f}")
-        
-        return {
-            'found': True,
-            'answer': answer,
-            'sql_query': sql_query,
-            'result_count': len(results),
-            'timing': {
-                'generation_ms': gen_time * 1000,
-                'execution_ms': exec_time * 1000,
-                'formatting_ms': format_time * 1000,
-                'total_ms': total_time * 1000
-            },
-            'cost': {
-                'generation': gen_cost,
-                'formatting': format_cost,
-                'total': total_cost
-            }
-        }
-
-    def _is_sql_relevant(self, user_message: str) -> bool:
-        """
-        Check if user question is relevant to chemical database
-        
-        Returns True if question asks about:
-        - Chemical compounds, properties, names
-        - CAS numbers, SMILES, InChIKey
-        - Mass, XLogP, molecular data
-        - Suspect lists, chemical databases
-        
-        Returns False for:
-        - General questions (what is X?)
-        - Authors, publications, papers
-        - Methodology, protocols
-        - Unrelated topics
-        """
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a classifier. Determine if a question is about chemical database queries.\n\n"
-                            "Answer YES if question asks about:\n"
-                            "- Chemical compounds, names, properties\n"
-                            "- CAS numbers, SMILES, InChIKey, molecular identifiers\n"
-                            "- Mass, XLogP, molecular weight, chemical properties\n"
-                            "- Suspect lists containing chemicals\n"
-                            "- Database searches for chemicals\n\n"
-                            "Answer NO if question asks about:\n"
-                            "- Authors, researchers, publications\n"
-                            "- Methodology, protocols, procedures\n"
-                            "- General knowledge (what is X?)\n"
-                            "- Platform features, documentation\n"
-                            "- Unrelated topics\n\n"
-                            "Respond with ONLY 'YES' or 'NO'"
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Question: {user_message}\n\nIs this a chemical database query?"
-                    }
-                ],
-                temperature=0.0,
-                max_tokens=5
-            )
-            
-            answer = response.choices[0].message.content.strip().upper()
-            is_relevant = answer == "YES"
-            
-            print(f"📊 SQL Relevance Check: {'✅ RELEVANT' if is_relevant else '❌ NOT RELEVANT'}")
-            
-            return is_relevant
-            
-        except Exception as e:
-            print(f"⚠️ Relevance check failed: {e}, assuming relevant")
-            return True  # Fail-safe: assume relevant if check fails
-    
-    def _generate_sql_query(self, question: str) -> str:
-        """
-        Generate SQL query from natural language
-        Cost-optimized prompt
-        """
-        try:
-            # Use instance client instead of creating new one
-            schema = """
-mv_compound_cards materialized view has these ESSENTIAL columns:
+    def _get_schema(self) -> str:
+        """Get database schema for LLM"""
+        return """
+mv_compound_cards materialized view columns:
 
 **IMPORTANT: Table name is: mv_compound_cards**
 
@@ -213,142 +49,403 @@ mv_compound_cards materialized view has these ESSENTIAL columns:
 - smiles (text): SMILES notation
 
 **Stats:**
-- list_count (integer): Number of suspect lists containing this compound
+- list_count (integer): Number of suspect lists
 
 **Computed:**
-- name_bucket (integer): 0=starts with letter, 1=number, 2=other
-- name_is_clean (boolean): Name has only letters/spaces/hyphens
+- name_bucket (integer): 0=letter, 1=number, 2=other
+- name_is_clean (boolean): Clean name flag
 """
+    
+    def answer(self, user_message: str) -> dict:
+        """
+        Answer user question with Smart SQL Agent
+        
+        Features:
+        1. Pre-check if SQL-relevant
+        2. Auto-discover synonyms
+        3. Generate ranked SQL (exact match first)
+        4. Handle typos
+        5. Format results naturally
+        """
+        start_time = time.time()
+        
+        print(f"\n{'='*60}")
+        print(f"🤖 Smart SQL Agent Query: {user_message}")
+        print(f"{'='*60}")
+        
+        # Check if LLM available
+        if not self.api_key or not self.client:
+            return self._no_llm_response()
+        
+        # ========================================
+        # STEP 1: PRE-CHECK IF SQL-RELEVANT
+        # ========================================
+        is_relevant = self._is_sql_relevant(user_message)
+        
+        if not is_relevant:
+            print("⏭️  Question not relevant to chemical database")
+            return {
+                'found': False,
+                'answer': None,
+                'result_count': 0,
+                'timing': {
+                    'generation_ms': 0,
+                    'execution_ms': 0,
+                    'formatting_ms': 0,
+                    'total_ms': (time.time() - start_time) * 1000
+                },
+                'cost': {
+                    'generation': 0,
+                    'formatting': 0,
+                    'total': 0
+                }
+            }
+        
+        # ========================================
+        # STEP 2: GENERATE SMART SQL WITH SYNONYMS & RANKING
+        # ========================================
+        gen_start = time.time()
+        smart_result = self._generate_smart_sql(user_message)
+        gen_time = time.time() - gen_start
+        gen_cost = 0.0003  # Slightly higher due to synonym discovery
+        
+        if not smart_result or not smart_result.get('sql_query'):
+            print("⚠️ Failed to generate smart SQL")
+            return self._default_llm_response(user_message, gen_cost, gen_time)
+        
+        sql_query = smart_result['sql_query']
+        main_term = smart_result.get('main_term', '')
+        synonyms = smart_result.get('synonyms', [])
+        
+        print(f"🎯 Main term: {main_term}")
+        print(f"🔄 Synonyms: {synonyms}")
+        print(f"✅ Generated Smart SQL")
+        
+        # ========================================
+        # STEP 3: EXECUTE SQL
+        # ========================================
+        exec_start = time.time()
+        results, error = self._execute_query(sql_query)
+        exec_time = time.time() - exec_start
+        
+        if error:
+            print(f"⚠️ SQL execution error: {error}")
+            return self._default_llm_response(user_message, gen_cost, gen_time)
+        
+        if not results:
+            print("⚠️ No results found")
+            return self._no_results_response(
+                sql_query, main_term, synonyms, gen_cost, gen_time, exec_time
+            )
+        
+        print(f"✅ Found {len(results)} results")
+        
+        # ========================================
+        # STEP 4: FORMAT RESULTS WITH RANKING INFO
+        # ========================================
+        format_start = time.time()
+        answer = self._format_smart_results(
+            user_message, results, main_term, synonyms
+        )
+        format_time = time.time() - format_start
+        format_cost = 0.00015
+        
+        total_time = time.time() - start_time
+        total_cost = gen_cost + format_cost
+        
+        print(f"⏱️  Total: {total_time*1000:.0f}ms")
+        print(f"💰 Cost: ${total_cost:.6f}")
+        
+        return {
+            'found': True,
+            'answer': answer,
+            'sql_query': sql_query,
+            'main_term': main_term,
+            'synonyms': synonyms,
+            'result_count': len(results),
+            'timing': {
+                'generation_ms': gen_time * 1000,
+                'execution_ms': exec_time * 1000,
+                'formatting_ms': format_time * 1000,
+                'total_ms': total_time * 1000
+            },
+            'cost': {
+                'generation': gen_cost,
+                'formatting': format_cost,
+                'total': total_cost
+            }
+        }
+    
+    def _is_sql_relevant(self, user_message: str) -> bool:
+      
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a classifier. Determine if a question is about chemical database queries.\n\n"
+                            "Answer YES if question asks about:\n"
+                            "- Chemical compounds, names, properties\n"
+                            "- CAS numbers, SMILES, InChIKey, molecular identifiers\n"
+                            "- Mass, molecular weight, chemical properties\n"
+                            "- Counting/listing chemicals (e.g., 'how many X', 'list all X')\n"
+                            "- Finding specific compounds or categories\n"
+                            "- Searching for pesticides, herbicides, pharmaceuticals, etc.\n"
+                            "- Database searches for chemicals\n"
+                            "- Queries like 'find', 'search', 'show', 'list' for chemicals\n\n"
+                            "Answer NO if question asks about:\n"
+                            "- Authors, researchers, publications, papers\n"
+                            "- Methodology, protocols, procedures\n"
+                            "- General knowledge about concepts (what is X? explain Y?)\n"
+                            "- Platform features, documentation, how-to guides\n"
+                            "- Unrelated topics\n\n"
+                            "IMPORTANT EXAMPLES:\n"
+                            "YES: 'how many pesticides do we have' (counting chemicals)\n"
+                            "YES: 'find compounds with benzene' (searching chemicals)\n"
+                            "YES: 'list all PFAS' (listing chemicals)\n"
+                            "NO: 'what is a pesticide?' (definition/concept)\n"
+                            "NO: 'how do pesticides work?' (mechanism/theory)\n\n"
+                            "Respond with ONLY 'YES' or 'NO'"
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {user_message}\n\nIs this a chemical database query?"
+                    }
+                ],
+                temperature=0.0,
+                max_tokens=5
+            )
             
-            prompt = f"""{schema}
+            answer = response.choices[0].message.content.strip().upper()
+            is_relevant = answer == "YES"
+            
+            print(f"📊 SQL Relevance: {'✅ YES' if is_relevant else '❌ NO'}")
+            return is_relevant
+            
+        except Exception as e:
+            print(f"⚠️ Relevance check failed: {e}")
+            return True  # Fail-safe: assume relevant
+    
+    def _generate_smart_sql(self, user_message: str) -> dict:
+        try:
+            system_prompt = f"""You are an expert SQL generator for chemical compound databases.
 
-User question: "{question}"
+DATABASE SCHEMA:
+{self.schema}
 
-Generate a PostgreSQL SELECT query on mv_compound_cards.
+YOUR TASK:
+1. Identify the main search term from user's query
+2. Find ALL synonyms, alternative names, and related terms for chemicals
+3. Generate PostgreSQL query with PRIORITY RANKING:
+   - PRIORITY 1: Exact match with user's ORIGINAL term (highest!)
+   - PRIORITY 2: Starts with user's ORIGINAL term  
+   - PRIORITY 3: Exact match with synonyms
+   - PRIORITY 4: Starts with synonyms
+   - PRIORITY 5: Contains user's ORIGINAL term
+   - PRIORITY 6: Contains synonyms
 
 CRITICAL RULES:
-1. Table name is: mv_compound_cards
-2. Use ONLY columns listed above
-3. Use ILIKE for text search (case-insensitive)
-4. LIMIT 10 for safety
-5. Return ONLY the SQL query, no explanation
+- User's ORIGINAL term ALWAYS has highest priority (rank 1-2)
+- Table name: mv_compound_cards
+- Use name_lc for case-insensitive search
+- LIMIT 50 results
+- Include match_priority column in SELECT
+- ORDER BY match_priority ASC, name ASC
 
-Examples:
-Q: "Find compounds with benzene"
-A: SELECT name, cas, mass_num FROM mv_compound_cards WHERE name_lc ILIKE '%benzene%' LIMIT 10;
+RESPONSE FORMAT (JSON only):
+{{
+  "main_term": "user's exact search term",
+  "synonyms": ["synonym1", "synonym2", ...],
+  "sql_query": "SELECT ... with CASE for ranking ORDER BY match_priority",
+  "explanation": "brief explanation"
+}}
 
-Q: "Compounds in more than 50 lists"
-A: SELECT name, cas, list_count FROM mv_compound_cards WHERE list_count > 50 ORDER BY list_count DESC LIMIT 10;
+EXAMPLE 1 - Pesticides:
+User: "Find pesticides"
+Response:
+{{
+  "main_term": "pesticide",
+  "synonyms": ["insecticide", "herbicide", "fungicide", "biocide"],
+  "sql_query": "SELECT *, CASE WHEN name_lc = 'pesticide' THEN 1 WHEN name_lc LIKE 'pesticide%' THEN 2 WHEN name_lc IN ('insecticide', 'herbicide', 'fungicide') THEN 3 WHEN name_lc LIKE 'insecticide%' OR name_lc LIKE 'herbicide%' THEN 4 WHEN name_lc LIKE '%pesticide%' THEN 5 WHEN name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' THEN 6 ELSE 10 END AS match_priority FROM mv_compound_cards WHERE name_lc LIKE '%pesticide%' OR name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' OR name_lc LIKE '%fungicide%' ORDER BY match_priority ASC, name ASC LIMIT 50;",
+  "explanation": "Searches pesticide first, then related pest control compounds"
+}}
 
-Q: "What is the mass of caffeine?"
-A: SELECT name, mass_num, cas FROM mv_compound_cards WHERE name_lc ILIKE '%caffeine%' LIMIT 10;
-
-Now generate SQL for: "{question}"
-
-SQL:"""
+EXAMPLE 2 - Counting:
+User: "how many pesticides do we have"
+Response:
+{{
+  "main_term": "pesticide",
+  "synonyms": ["insecticide", "herbicide", "fungicide"],
+  "sql_query": "SELECT COUNT(*) as total_count FROM mv_compound_cards WHERE name_lc LIKE '%pesticide%' OR name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' OR name_lc LIKE '%fungicide%';",
+  "explanation": "Counts all pesticide-related compounds including synonyms"
+}}
+"""
             
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a PostgreSQL expert. Generate only valid SQL queries."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Generate smart SQL for: {user_message}"}
                 ],
-                temperature=0.0,
-                max_tokens=150
+                response_format={"type": "json_object"},
+                temperature=0.3,
+                max_tokens=800
             )
             
-            sql = response.choices[0].message.content.strip()
+            result = json.loads(response.choices[0].message.content)
             
-            # Clean up response
-            sql = sql.replace('```sql', '').replace('```', '').strip()
+            # Validate
+            if 'sql_query' not in result:
+                return None
             
-            # FORCE correct table name
+            # Force correct table name (just in case)
+            sql = result['sql_query']
             sql = sql.replace('CompoundView', 'mv_compound_cards')
             sql = sql.replace('compoundview', 'mv_compound_cards')
-            sql = sql.replace('COMPOUNDVIEW', 'mv_compound_cards')
+            result['sql_query'] = sql
             
-            # Validate basic SQL structure
-            if not sql.upper().startswith('SELECT'):
-                return None
-            
-            if 'mv_compound_cards' not in sql:
-                return None
-            
-            return sql
+            return result
             
         except Exception as e:
-            print(f"⚠️ SQL generation error: {e}")
+            print(f"⚠️ Smart SQL generation error: {e}")
+            # Fallback to simple SQL
+            return self._generate_simple_sql_fallback(user_message)
+    
+    def _generate_simple_sql_fallback(self, user_message: str) -> dict:
+        """Fallback: Generate simple SQL without synonyms"""
+        try:
+            # Extract likely search term
+            words = user_message.lower().split()
+            search_terms = []
+            
+            skip_words = ['find', 'search', 'show', 'get', 'list', 'how', 'many', 
+                         'do', 'we', 'have', 'the', 'a', 'an', 'all', 'with']
+            
+            for word in words:
+                clean = word.strip('.,!?;:')
+                if clean and clean not in skip_words:
+                    search_terms.append(clean)
+            
+            if not search_terms:
+                return None
+            
+            main_term = search_terms[0]
+            
+            # Check if counting query
+            if any(word in user_message.lower() for word in ['how many', 'count', 'number of']):
+                sql_query = f"SELECT COUNT(*) as total_count FROM mv_compound_cards WHERE name_lc LIKE '%{main_term}%';"
+            else:
+                sql_query = f"SELECT * FROM mv_compound_cards WHERE name_lc LIKE '%{main_term}%' ORDER BY name ASC LIMIT 50;"
+            
+            return {
+                'main_term': main_term,
+                'synonyms': [],
+                'sql_query': sql_query,
+                'explanation': 'Simple search fallback'
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Fallback SQL error: {e}")
             return None
     
     def _execute_query(self, sql_query: str):
-        """
-        Execute SQL query safely
-        Returns (results, error)
-        """
+        """Execute SQL query safely"""
         try:
             with connection.cursor() as cursor:
                 cursor.execute(sql_query)
-                
-                # Get column names
                 columns = [col[0] for col in cursor.description]
-                
-                # Fetch results
                 rows = cursor.fetchall()
-                
-                # Convert to list of dicts
-                results = []
-                for row in rows:
-                    results.append(dict(zip(columns, row)))
-                
+                results = [dict(zip(columns, row)) for row in rows]
                 return results, None
-                
         except Exception as e:
             return None, str(e)
     
-    def _format_results_with_llm(self, question: str, results: list, sql_query: str) -> str:
-        """
-        Format query results into natural language answer
-        Cost-optimized
-        """
+    def _format_smart_results(self, question: str, results: list, 
+                              main_term: str, synonyms: list) -> str:
+        """Format results with priority grouping"""
         try:
-            # Use instance client
-            limited_results = results[:5]
-            results_text = json.dumps(limited_results, indent=2, default=str)[:1000]
+            # Check if it's a count query
+            if len(results) == 1 and 'total_count' in results[0]:
+                count = results[0]['total_count']
+                synonym_text = f" (including synonyms: {', '.join(synonyms[:3])})" if synonyms else ""
+                return f"✅ Found **{count}** compounds matching **{main_term}**{synonym_text} in the database."
             
-            prompt = f"""Question: "{question}"
-
-SQL Query: {sql_query}
-
-Results ({len(results)} total, showing first {len(limited_results)}):
-{results_text}
-
-Provide a concise, natural language answer. Include:
-- Direct answer to the question
-- Key data points (names, CAS numbers, masses if relevant)
-- Total count if multiple results
-
-Keep it under 150 words."""
+            # Separate by priority if available
+            exact_matches = []
+            synonym_matches = []
             
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a helpful chemical database assistant."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=200
-            )
+            for result in results:
+                name = result.get('name', '').lower()
+                priority = result.get('match_priority', 10)
+                
+                if priority <= 2:  # Exact or starts with user term
+                    exact_matches.append(result)
+                else:
+                    synonym_matches.append(result)
             
-            return response.choices[0].message.content.strip()
+            # Build answer
+            answer_parts = []
+            
+            # Exact matches section
+            if exact_matches:
+                answer_parts.append(
+                    f"✅ Found **{len(exact_matches)}** exact matches for **{main_term}**:"
+                )
+                
+                for i, r in enumerate(exact_matches[:10], 1):
+                    name = r.get('name', 'N/A')
+                    cas = r.get('cas', 'N/A')
+                    mass = r.get('mass_num', 'N/A')
+                    
+                    answer_parts.append(
+                        f"{i}. **{name}** (CAS: {cas}, Mass: {mass})"
+                    )
+                
+                if len(exact_matches) > 10:
+                    answer_parts.append(
+                        f"   ... and {len(exact_matches) - 10} more exact matches"
+                    )
+            
+            # Synonym matches section
+            if synonym_matches and synonyms:
+                answer_parts.append(
+                    f"\n📚 Also found **{len(synonym_matches)}** related compounds "
+                    f"(synonyms: {', '.join(synonyms[:3])}):"
+                )
+                
+                for i, r in enumerate(synonym_matches[:5], 1):
+                    name = r.get('name', 'N/A')
+                    answer_parts.append(f"{i}. {name}")
+                
+                if len(synonym_matches) > 5:
+                    answer_parts.append(
+                        f"   ... and {len(synonym_matches) - 5} more"
+                    )
+            
+            # Total
+            total = len(results)
+            if total > 15:
+                answer_parts.append(
+                    f"\n**Total: {total} compounds** (showing top results)"
+                )
+            
+            return "\n".join(answer_parts)
             
         except Exception as e:
             print(f"⚠️ Formatting error: {e}")
             return self._format_results_simple(results)
     
     def _format_results_simple(self, results: list) -> str:
-        """Simple text formatting fallback"""
+        """Simple fallback formatting"""
         if not results:
             return "No results found."
+        
+        # Check if count query
+        if len(results) == 1 and 'total_count' in results[0]:
+            return f"Found {results[0]['total_count']} compounds."
         
         answer = f"Found {len(results)} compound(s):\n\n"
         
@@ -368,12 +465,34 @@ Keep it under 150 words."""
         
         return answer
     
-    def _no_results_response(self, sql_query, gen_cost, gen_time, exec_time):
-        """Response when query returns no results"""
+    def _no_results_response(self, sql_query, main_term, synonyms, 
+                            gen_cost, gen_time, exec_time):
+        """Response when no results found"""
+        
+        # Build helpful message
+        message_parts = [
+            f"No results found for **{main_term}**"
+        ]
+        
+        if synonyms:
+            message_parts.append(
+                f"(also searched: {', '.join(synonyms[:3])})"
+            )
+        
+        message_parts.extend([
+            "\n\n**Suggestions:**",
+            "• Check spelling",
+            "• Try a broader search term",
+            "• Use chemical name instead of brand name",
+            "• Try searching by CAS number or molecular formula"
+        ])
+        
         return {
             'found': False,
-            'answer': "I generated a database query, but it returned no results. Try rephrasing your question or being more specific.",
+            'answer': "\n".join(message_parts),
             'sql_query': sql_query,
+            'main_term': main_term,
+            'synonyms': synonyms,
             'result_count': 0,
             'timing': {
                 'generation_ms': gen_time * 1000,
@@ -389,33 +508,19 @@ Keep it under 150 words."""
         }
     
     def _default_llm_response(self, question, gen_cost, gen_time):
-        """
-        Default LLM response when SQL generation fails
-        Direct answer without database
-        """
+        """Fallback response when SQL fails"""
         try:
-            # Use instance client
-            prompt = f"""The user asked: "{question}"
-
-This is about the NORMAN chemical database, but I couldn't generate a database query.
-
-Provide a brief, helpful response:
-- If it's a general question about chemicals, provide basic chemical knowledge
-- If it's about the database, explain you need more specific details
-- Keep it under 100 words"""
-            
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a helpful chemistry assistant."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": "You are a chemistry assistant."},
+                    {"role": "user", "content": f"Brief answer for NORMAN chemical database question: {question}"}
                 ],
                 temperature=0.5,
                 max_tokens=150
             )
             
             answer = response.choices[0].message.content.strip()
-            default_cost = 0.0001
             
             return {
                 'found': True,
@@ -430,20 +535,19 @@ Provide a brief, helpful response:
                 },
                 'cost': {
                     'generation': gen_cost,
-                    'formatting': default_cost,
-                    'total': gen_cost + default_cost
+                    'formatting': 0.0001,
+                    'total': gen_cost + 0.0001
                 }
             }
-            
         except Exception as e:
-            print(f"⚠️ Default response error: {e}")
+            print(f"⚠️ Fallback error: {e}")
             return self._no_llm_response()
     
     def _no_llm_response(self):
         """Response when no LLM available"""
         return {
             'found': False,
-            'answer': "I need an OpenAI API key to answer database questions. Please check the FAQ or documentation instead.",
+            'answer': "OpenAI API key required for database queries. Please check the FAQ or documentation.",
             'sql_query': None,
             'result_count': 0,
             'timing': {'generation_ms': 0, 'execution_ms': 0, 'formatting_ms': 0, 'total_ms': 0},
