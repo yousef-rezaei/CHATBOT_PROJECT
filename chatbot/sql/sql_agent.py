@@ -163,6 +163,7 @@ mv_compound_cards materialized view columns:
             'main_term': main_term,
             'synonyms': synonyms,
             'result_count': len(results),
+            'results': results,  # ✅ ADDED: Store actual results
             'timing': {
                 'generation_ms': gen_time * 1000,
                 'execution_ms': exec_time * 1000,
@@ -231,57 +232,44 @@ mv_compound_cards materialized view columns:
     
     def _generate_smart_sql(self, user_message: str) -> dict:
         try:
-            system_prompt = f"""You are an expert SQL generator for chemical compound databases.
+            # ✅ FIXED: Use triple quotes to avoid f-string issues
+            system_prompt = """You are an expert SQL generator for chemical compound databases.
 
 DATABASE SCHEMA:
-{self.schema}
+""" + self.schema + """
 
 YOUR TASK:
 1. Identify the main search term from user's query
 2. Find ALL synonyms, alternative names, and related terms for chemicals
-3. Generate PostgreSQL query with PRIORITY RANKING:
-   - PRIORITY 1: Exact match with user's ORIGINAL term (highest!)
-   - PRIORITY 2: Starts with user's ORIGINAL term  
-   - PRIORITY 3: Exact match with synonyms
-   - PRIORITY 4: Starts with synonyms
-   - PRIORITY 5: Contains user's ORIGINAL term
-   - PRIORITY 6: Contains synonyms
+3. Generate PostgreSQL query with PRIORITY RANKING
 
 CRITICAL RULES:
-- User's ORIGINAL term ALWAYS has highest priority (rank 1-2)
+- NEVER use COUNT(*) - ALWAYS return full compound data with SELECT *
 - Table name: mv_compound_cards
 - Use name_lc for case-insensitive search
 - LIMIT 50 results
-- Include match_priority column in SELECT
+- Include match_priority column
 - ORDER BY match_priority ASC, name ASC
 
 RESPONSE FORMAT (JSON only):
-{{
+{
   "main_term": "user's exact search term",
-  "synonyms": ["synonym1", "synonym2", ...],
-  "sql_query": "SELECT ... with CASE for ranking ORDER BY match_priority",
+  "synonyms": ["synonym1", "synonym2"],
+  "sql_query": "SELECT * with CASE for ranking",
   "explanation": "brief explanation"
-}}
+}
 
-EXAMPLE 1 - Pesticides:
-User: "Find pesticides"
-Response:
-{{
-  "main_term": "pesticide",
-  "synonyms": ["insecticide", "herbicide", "fungicide", "biocide"],
-  "sql_query": "SELECT *, CASE WHEN name_lc = 'pesticide' THEN 1 WHEN name_lc LIKE 'pesticide%' THEN 2 WHEN name_lc IN ('insecticide', 'herbicide', 'fungicide') THEN 3 WHEN name_lc LIKE 'insecticide%' OR name_lc LIKE 'herbicide%' THEN 4 WHEN name_lc LIKE '%pesticide%' THEN 5 WHEN name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' THEN 6 ELSE 10 END AS match_priority FROM mv_compound_cards WHERE name_lc LIKE '%pesticide%' OR name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' OR name_lc LIKE '%fungicide%' ORDER BY match_priority ASC, name ASC LIMIT 50;",
-  "explanation": "Searches pesticide first, then related pest control compounds"
-}}
-
-EXAMPLE 2 - Counting:
+EXAMPLE - Counting:
 User: "how many pesticides do we have"
-Response:
-{{
+Response MUST return full data, not COUNT:
+{
   "main_term": "pesticide",
   "synonyms": ["insecticide", "herbicide", "fungicide"],
-  "sql_query": "SELECT COUNT(*) as total_count FROM mv_compound_cards WHERE name_lc LIKE '%pesticide%' OR name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' OR name_lc LIKE '%fungicide%';",
-  "explanation": "Counts all pesticide-related compounds including synonyms"
-}}
+  "sql_query": "SELECT *, CASE WHEN name_lc = 'pesticide' THEN 1 WHEN name_lc LIKE 'pesticide%' THEN 2 WHEN name_lc IN ('insecticide', 'herbicide') THEN 3 WHEN name_lc LIKE '%pesticide%' THEN 5 ELSE 10 END AS match_priority FROM mv_compound_cards WHERE name_lc LIKE '%pesticide%' OR name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' ORDER BY match_priority ASC LIMIT 50;",
+  "explanation": "Returns all pesticide compounds with ranking"
+}
+
+IMPORTANT: NEVER use COUNT - always SELECT * with full compound data!
 """
             
             response = self.client.chat.completions.create(
@@ -334,11 +322,8 @@ Response:
             
             main_term = search_terms[0]
             
-            # Check if counting query
-            if any(word in user_message.lower() for word in ['how many', 'count', 'number of']):
-                sql_query = f"SELECT COUNT(*) as total_count FROM mv_compound_cards WHERE name_lc LIKE '%{main_term}%';"
-            else:
-                sql_query = f"SELECT * FROM mv_compound_cards WHERE name_lc LIKE '%{main_term}%' ORDER BY name ASC LIMIT 50;"
+            # ✅ ALWAYS return full data, never COUNT
+            sql_query = f"SELECT * FROM mv_compound_cards WHERE name_lc LIKE '%{main_term}%' ORDER BY name ASC LIMIT 50;"
             
             return {
                 'main_term': main_term,
@@ -367,18 +352,37 @@ Response:
                               main_term: str, synonyms: list) -> str:
         """Format results with priority grouping"""
         try:
-            # Check if it's a count query
-            if len(results) == 1 and 'total_count' in results[0]:
-                count = results[0]['total_count']
-                synonym_text = f" (including synonyms: {', '.join(synonyms[:3])})" if synonyms else ""
-                return f"✅ Found **{count}** compounds matching **{main_term}**{synonym_text} in the database."
+            question_lower = question.lower()
+            wants_count = any(word in question_lower for word in ['how many', 'count', 'number of'])
             
+            # If user wants count, show count + preview
+            if wants_count and len(results) > 0:
+                count = len(results)
+                synonym_text = f" (including synonyms: {', '.join(synonyms[:3])})" if synonyms else ""
+                
+                preview_parts = [
+                    f"✅ Found **{count}** compounds matching **{main_term}**{synonym_text} in the database.",
+                    "",
+                    "**Preview:**"
+                ]
+                
+                for i, r in enumerate(results[:5], 1):
+                    name = r.get('name', 'N/A')
+                    preview_parts.append(f"{i}. {name}")
+                
+                if count > 5:
+                    preview_parts.append(f"... and {count - 5} more")
+                    preview_parts.append("")
+                    preview_parts.append("💡 Say 'show all' to see complete list")
+                
+                return "\n".join(preview_parts)
+            
+            # Otherwise, show detailed results
             # Separate by priority if available
             exact_matches = []
             synonym_matches = []
             
             for result in results:
-                name = result.get('name', '').lower()
                 priority = result.get('match_priority', 10)
                 
                 if priority <= 2:  # Exact or starts with user term
@@ -443,13 +447,9 @@ Response:
         if not results:
             return "No results found."
         
-        # Check if count query
-        if len(results) == 1 and 'total_count' in results[0]:
-            return f"Found {results[0]['total_count']} compounds."
-        
         answer = f"Found {len(results)} compound(s):\n\n"
         
-        for i, r in enumerate(results[:5], 1):
+        for i, r in enumerate(results[:10], 1):
             name = r.get('name', 'N/A')
             cas = r.get('cas', 'N/A')
             mass = r.get('mass_num', 'N/A')
@@ -460,8 +460,8 @@ Response:
             if mass != 'N/A':
                 answer += f"   Mass: {mass} Da\n"
         
-        if len(results) > 5:
-            answer += f"\n_...and {len(results) - 5} more_"
+        if len(results) > 10:
+            answer += f"\n_...and {len(results) - 10} more_"
         
         return answer
     

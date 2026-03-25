@@ -212,7 +212,11 @@ function handleQuestionClick(question) {
             'Content-Type': 'application/json',
             'X-CSRFToken': CONFIG.csrfToken
         },
-        body: JSON.stringify({ message: question })
+        body: JSON.stringify({ 
+            message: question,
+            skip_tier: 0,
+            is_faq_button: true  // ← Flag to indicate this came from FAQ quick action
+         })
     })
     .then(response => response.json())
     .then(data => {
@@ -445,7 +449,7 @@ function handleQuestionClick(question) {
                 `;
             
                // Show loading for next tier
-            setTyping(true, metadata.tier + 1);  // ← Add this line
+            setTyping(true, metadata.tier + 1);  
             // ✅ FIX: Set input value before sending
             setTimeout(() => {
                 elements.chatbotInput.value = state.lastUserMessage;
@@ -542,7 +546,8 @@ async function sendMessage(skipTier = 0, showFeedback = true) {
             },
             body: JSON.stringify({
                 message: message,
-                skip_tier: skipTier
+                skip_tier: skipTier,
+                is_faq_button: false
             })
         });
         

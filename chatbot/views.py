@@ -6,13 +6,14 @@ from datetime import datetime
 import json
 import os
 import time
-
 from .faq_handler import get_faq_handler
 from .rag.pdf_rag_handler import get_pdf_rag_handler 
 from .sql.sql_agent import get_sql_agent
+from .memory_manager import get_memory_manager  
+from .llm_router import get_llm_router  
 
 # FAQ CSV path
-FAQ_CSV_PATH = os.path.join(os.path.dirname(__file__), 'data', 'chatbot_faq.csv')
+FAQ_CSV_PATH = os.path.join(os.path.dirname(__file__), 'faq', 'data', 'chatbot_faq.csv')
 
 
 @ensure_csrf_cookie
@@ -20,30 +21,20 @@ def home(request):
     """Render the home page with chatbot widget"""
     return render(request, 'chatbot/index.html', {})
 
-import json
-import time
-import os
-from datetime import datetime
-from django.http import JsonResponse
-from django.views.decorators.http import require_http_methods
-# from django.views.decorators.csrf import csrf_exempt
-
-# Import your handlers
-# from chatbot.faq.faq_handler import get_faq_handler
-# from chatbot.pdf_rag.pdf_rag_handler import get_pdf_rag_handler
-from chatbot.sql.sql_agent import get_sql_agent
-
-FAQ_CSV_PATH = 'chatbot/faq/data/chatbot_faq.csv'
-
-
-def get_categories_api():
-    """Return FAQ categories for frontend"""
-    # Your existing get_categories_api code
-    pass
-
 
 @require_http_methods(["GET", "POST"])
 def chatbot_api(request):
+    """
+    Main chatbot API with conversation memory and smart routing
+    
+    Routing logic:
+    1. First question → Sequential tiers (FAQ→RAG→SQL→LLM) - NO LLM router
+    2. FAQ button click → Direct to FAQ - NO LLM router
+    3. Has history → LLM router decides tier (including follow-up detection)
+    4. Negative feedback → Continue from next tier
+    5. Follow-up detected → Retrieve from memory
+    6. Explicit database intent → Override and force SQL tier
+    """
     
     if request.method == "GET":
         action = request.GET.get('action', '')
@@ -54,30 +45,253 @@ def chatbot_api(request):
     # POST - Handle user questions
     request_start = time.time()
     faq_time = 0
-    
-    # ✅ NEW: Track tier attempts
     tier_attempts = []
     
     try:
+        # ============================================================
+        # PARSE REQUEST
+        # ============================================================
         data = json.loads(request.body)
         user_message = data.get('message', '').strip()
         skip_tier = data.get('skip_tier', 0)
+        is_faq_button = data.get('is_faq_button', False)
         
+        # Validate
         if not user_message:
             return JsonResponse({'error': 'Message cannot be empty'}, status=400)
         
         if len(user_message) > 1000:
             return JsonResponse({'error': 'Message too long'}, status=400)
         
+        # ============================================================
+        # SETUP SESSION & MEMORY
+        # ============================================================
+        if not request.session.session_key:
+            request.session.create()
+        session_id = request.session.session_key
+        
+        memory = get_memory_manager()
+        has_history = memory.has_history(session_id)
+        
         print(f"\n{'='*60}")
-        print(f"📨 Query: '{user_message[:50]}...' (skip_tier={skip_tier})")
+        print(f"📨 Query: '{user_message[:50]}...'")
+        print(f"💭 History: {len(memory.get_history(session_id))} exchanges")
+        print(f"🔘 FAQ Button: {is_faq_button}")
+        print(f"👎 Skip Tier: {skip_tier}")
         print(f"{'='*60}")
+        
+        # ============================================================
+        # ROUTING DECISION
+        # ============================================================
+        start_tier = 1  # Default: start from FAQ
+        routing = None
+        
+        if skip_tier > 0:
+            # ✅ CASE 1: Negative feedback - continue from next tier
+            start_tier = skip_tier + 1
+            print(f"👎 Negative feedback → Starting from Tier {start_tier} (sequential)")
+            
+        elif is_faq_button:
+            # ✅ CASE 2: FAQ button clicked - go directly to FAQ (no LLM)
+            start_tier = 1
+            print(f"🔘 FAQ button → Direct to FAQ Tier 1 (no LLM router)")
+            
+        elif not has_history:
+            # ✅ CASE 3: First question - use sequential tiers (no LLM)
+            start_tier = 1
+            print(f"🆕 First question → Sequential tiers (no LLM router)")
+            
+        else:
+            # ✅ CASE 4: Has history - use LLM router
+            print(f"🧠 Has history → Using LLM router...")
+            
+            try:
+                router = get_llm_router()
+                history_context = memory.format_for_llm(session_id)
+                
+                routing = router.route(user_message, history_context)
+                
+                # Check if follow-up
+                if routing.get('is_followup'):
+                    print(f"🔄 Follow-up detected: {routing.get('reasoning')}")
+                    start_tier = 0  # Special marker for follow-up
+                else:
+                    start_tier = routing.get('tier', 1)
+                    print(f"✅ LLM router recommended: Tier {start_tier}")
+                
+            except Exception as e:
+                print(f"⚠️ LLM router error: {e}, defaulting to Tier 1")
+                start_tier = 1
+        
+        # ============================================================
+        # 🎯 EXPLICIT DATABASE INTENT OVERRIDE (FIXED!)
+        # ============================================================
+        database_keywords = [
+            'search in database', 'search database', 'query database',
+            'find in database', 'database search', 'in the database',
+            'how many', 'count', 'list all', 'give me all',
+            'find all', 'search for', 'find compounds', 'find chemicals',
+            'how many exist', 'do we have', 'are there', 'you can search',
+            'search it', 'look it up', 'check database'
+        ]
+        
+        # "show all" keywords - separate handling for follow-ups
+        followup_keywords = ['show all', 'display all', 'list them all', 'all of them', 'show them all']
+        
+        user_lower = user_message.lower()
+        
+        # Check for explicit database intent (excluding follow-up keywords)
+        explicit_database_intent = any(keyword in user_lower for keyword in database_keywords)
+        
+        # Check for "show all" style keywords
+        is_followup_style = any(keyword in user_lower for keyword in followup_keywords)
+        
+        # ✅ FIX: Only override if NOT a follow-up (start_tier != 0)
+        if explicit_database_intent and start_tier != 0:
+            print(f"🎯 OVERRIDE: Explicit database search intent detected!")
+            matched_keywords = [k for k in database_keywords if k in user_lower]
+            print(f"   Keywords found: {matched_keywords}")
+            print(f"   ✅ Forcing Tier 3 (SQL) for database search")
+            start_tier = 3  # Force SQL tier
+            
+        elif is_followup_style and start_tier != 0:
+            # "show all" detected but NOT a follow-up by LLM router
+            # This means it's a new query, so force SQL
+            print(f"🎯 OVERRIDE: 'Show all' style query detected (not a follow-up)")
+            print(f"   ✅ Forcing Tier 3 (SQL) for database search")
+            start_tier = 3
+        
+        # If start_tier == 0 (follow-up), do NOT override - let it proceed to follow-up handler
+        
+        # ============================================================
+        # HANDLE FOLLOW-UP QUESTIONS (only if NOT overridden)
+        # ============================================================
+        if start_tier == 0:  # Follow-up detected and NOT overridden
+            print(f"🔄 Processing follow-up request...")
+            
+            last_exchange = memory.get_last_exchange(session_id)
+            
+            if last_exchange:
+                last_tier = last_exchange.get('tier')
+                metadata = last_exchange.get('metadata', {})
+                
+                print(f"   Last tier: {last_tier}")
+                print(f"   Has metadata: {bool(metadata)}")
+                
+                # CASE 1: Follow-up to SQL results
+                if last_tier == 3 and 'results' in metadata:
+                    print(f"   ✅ Retrieving SQL results from memory")
+                    
+                    results = metadata['results']
+                    main_term = metadata.get('main_term', 'compounds')
+                    synonyms = metadata.get('synonyms', [])
+                    
+                    # Format ALL stored results
+                    answer = format_all_sql_results(results, main_term, synonyms)
+                    
+                    # Store this follow-up in memory
+                    memory.add_exchange(
+                        session_id,
+                        user_message,
+                        answer,
+                        tier=3,
+                        metadata={'type': 'followup', 'parent_tier': 3}
+                    )
+                    
+                    total_time = time.time() - request_start
+                    
+                    return JsonResponse({
+                        'response': answer,
+                        'type': 'followup_sql',
+                        'tier': 3,
+                        'tier_name': 'Chemical Database (Follow-up)',
+                        'result_count': len(results),
+                        'can_retry': False,
+                        'next_tier': None,
+                        'timing': {
+                            'total_ms': total_time * 1000
+                        },
+                        'cost': {
+                            'total': 0.0  # No cost for retrieval
+                        },
+                        'timestamp': datetime.now().isoformat()
+                    })
+                
+                # CASE 2: Follow-up to other tiers (FAQ, RAG, LLM)
+                else:
+                    print(f"   ℹ️ Follow-up to tier {last_tier}, using LLM with context")
+                    
+                    # Use LLM with full context
+                    from openai import OpenAI
+                    client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+                    
+                    history_context = memory.format_for_llm(session_id)
+                    
+                    response = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a helpful assistant. Answer follow-up questions based on the conversation context."
+                            },
+                            {
+                                "role": "user",
+                                "content": f"""Previous conversation:
+{history_context}
+
+Follow-up question: {user_message}
+
+Answer based on the context above."""
+                            }
+                        ],
+                        temperature=0.3,
+                        max_tokens=400
+                    )
+                    
+                    answer = response.choices[0].message.content.strip()
+                    
+                    # Store in memory
+                    memory.add_exchange(
+                        session_id,
+                        user_message,
+                        answer,
+                        tier=4,
+                        metadata={'type': 'followup', 'parent_tier': last_tier}
+                    )
+                    
+                    # Calculate cost
+                    input_tokens = response.usage.prompt_tokens
+                    output_tokens = response.usage.completion_tokens
+                    cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 1000
+                    
+                    total_time = time.time() - request_start
+                    
+                    return JsonResponse({
+                        'response': answer,
+                        'type': 'followup_llm',
+                        'tier': 4,
+                        'tier_name': 'AI Assistant (Follow-up)',
+                        'can_retry': False,
+                        'next_tier': None,
+                        'timing': {
+                            'total_ms': total_time * 1000
+                        },
+                        'cost': {
+                            'llm': cost,
+                            'total': cost
+                        },
+                        'timestamp': datetime.now().isoformat()
+                    })
+            
+            else:
+                # No previous exchange, treat as new question
+                print(f"   ⚠️ No previous exchange found, treating as new question")
+                start_tier = 1
         
         # ============================================================
         # TIER 1: FAQ HANDLER
         # ============================================================
-        if skip_tier < 1:
-            # ✅ Track attempt
+        if start_tier <= 1:
             tier_attempts.append({
                 'tier': 1,
                 'tier_name': 'FAQ',
@@ -90,13 +304,20 @@ def chatbot_api(request):
             faq_handler = get_faq_handler(FAQ_CSV_PATH)
             
             if faq_handler:
-                faq_result = faq_handler.answer(user_message, threshold=0.6)
+                faq_result = faq_handler.answer(user_message, threshold=0.7)
                 faq_time = time.time() - faq_start
                 
                 if faq_result['found']:
+                    # ✅ Store in memory
+                    memory.add_exchange(
+                        session_id,
+                        user_message,
+                        faq_result['answer'],
+                        tier=1
+                    )
+                    
                     total_time = time.time() - request_start
                     
-                    # ✅ Mark as success
                     tier_attempts[-1]['status'] = 'success'
                     tier_attempts[-1]['message'] = 'Found in FAQ'
                     
@@ -111,7 +332,7 @@ def chatbot_api(request):
                         'confidence': faq_result['confidence'],
                         'can_retry': True,
                         'next_tier': 'PDF Documents',
-                        'tier_attempts': tier_attempts,  # ✅ Send progress
+                        'tier_attempts': tier_attempts,
                         'timing': {
                             'faq_ms': faq_time * 1000,
                             'total_ms': total_time * 1000
@@ -122,7 +343,6 @@ def chatbot_api(request):
                         'timestamp': datetime.now().isoformat()
                     })
                 else:
-                    # ✅ Mark as not found
                     tier_attempts[-1]['status'] = 'not_found'
                     tier_attempts[-1]['message'] = 'Not found in FAQ'
                     
@@ -131,8 +351,7 @@ def chatbot_api(request):
         # ============================================================
         # TIER 2: PDF RAG HANDLER
         # ============================================================
-        if skip_tier < 2:
-            # ✅ Track attempt
+        if start_tier <= 2:
             tier_attempts.append({
                 'tier': 2,
                 'tier_name': 'PDF Documents',
@@ -151,9 +370,16 @@ def chatbot_api(request):
                 rag_time = time.time() - rag_start
                 
                 if rag_result['found']:
+                    # ✅ Store in memory
+                    memory.add_exchange(
+                        session_id,
+                        user_message,
+                        rag_result['answer'],
+                        tier=2
+                    )
+                    
                     total_time = time.time() - request_start
                     
-                    # ✅ Mark as success
                     tier_attempts[-1]['status'] = 'success'
                     tier_attempts[-1]['message'] = 'Found in documents'
                     
@@ -169,9 +395,9 @@ def chatbot_api(request):
                         'answer_method': rag_result.get('answer_method', 'template'),
                         'can_retry': True,
                         'next_tier': 'Chemical Database',
-                        'tier_attempts': tier_attempts,  # ✅ Send progress
+                        'tier_attempts': tier_attempts,
                         'timing': {
-                            'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
+                            'faq_ms': faq_time * 1000 if start_tier <= 1 else 0,
                             'rag_search_ms': rag_result['timing']['search_ms'],
                             'rag_generation_ms': rag_result['timing']['generation_ms'],
                             'rag_total_ms': rag_result['timing']['total_ms'],
@@ -184,14 +410,12 @@ def chatbot_api(request):
                         'timestamp': datetime.now().isoformat()
                     })
                 else:
-                    # ✅ Mark as not found
                     tier_attempts[-1]['status'] = 'not_found'
                     tier_attempts[-1]['message'] = 'Not found in documents'
                     
                     print(f"⏭️ TIER 2 (PDF RAG): No match (best: {rag_result.get('top_similarity', 0):.3f})")
                     
             except Exception as e:
-                # ✅ Mark as error
                 tier_attempts[-1]['status'] = 'error'
                 tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
                 
@@ -200,8 +424,7 @@ def chatbot_api(request):
         # ============================================================
         # TIER 3: SQL AGENT
         # ============================================================
-        if skip_tier < 3:
-            # ✅ Track attempt
+        if start_tier <= 3:
             tier_attempts.append({
                 'tier': 3,
                 'tier_name': 'Chemical Database',
@@ -223,9 +446,22 @@ def chatbot_api(request):
                     has_results = sql_result.get('result_count', 0) > 0
                     
                     if has_results:
+                        # ✅ Store in memory WITH results metadata
+                        memory.add_exchange(
+                            session_id,
+                            user_message,
+                            sql_result['answer'],
+                            tier=3,
+                            metadata={
+                                'sql_query': sql_result.get('sql_query'),
+                                'results': sql_result.get('results', [])[:20],  # Store top 20
+                                'main_term': sql_result.get('main_term'),
+                                'synonyms': sql_result.get('synonyms')
+                            }
+                        )
+                        
                         total_time = time.time() - request_start
                         
-                        # ✅ Mark as success
                         tier_attempts[-1]['status'] = 'success'
                         tier_attempts[-1]['message'] = f'Found {sql_result.get("result_count", 0)} results'
                         
@@ -240,9 +476,9 @@ def chatbot_api(request):
                             'result_count': sql_result.get('result_count', 0),
                             'can_retry': True,
                             'next_tier': 'AI Assistant',
-                            'tier_attempts': tier_attempts,  # ✅ Send progress
+                            'tier_attempts': tier_attempts,
                             'timing': {
-                                'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
+                                'faq_ms': faq_time * 1000 if start_tier <= 1 else 0,
                                 'sql_generation_ms': sql_result['timing']['generation_ms'],
                                 'sql_execution_ms': sql_result['timing']['execution_ms'],
                                 'sql_formatting_ms': sql_result['timing']['formatting_ms'],
@@ -257,20 +493,17 @@ def chatbot_api(request):
                             'timestamp': datetime.now().isoformat()
                         })
                     else:
-                        # ✅ Mark as not found
                         tier_attempts[-1]['status'] = 'not_found'
                         tier_attempts[-1]['message'] = 'Query not relevant for database'
                         
                         print(f"⏭️ TIER 3 (SQL): No results returned")
                 else:
-                    # ✅ Mark as invalid
                     tier_attempts[-1]['status'] = 'not_found'
                     tier_attempts[-1]['message'] = 'Invalid result'
                     
-                    print(f"⏭️ TIER 3 (SQL): Invalid result - {sql_result}")
+                    print(f"⏭️ TIER 3 (SQL): Invalid result")
                     
             except Exception as e:
-                # ✅ Mark as error
                 tier_attempts[-1]['status'] = 'error'
                 tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
                 
@@ -279,7 +512,6 @@ def chatbot_api(request):
         # ============================================================
         # TIER 4: LLM FALLBACK (FINAL TIER)
         # ============================================================
-        # ✅ Track attempt
         tier_attempts.append({
             'tier': 4,
             'tier_name': 'AI Assistant',
@@ -297,28 +529,40 @@ def chatbot_api(request):
             
             llm_start = time.time()
             
+            # ✅ Include conversation context if available
+            history_context = memory.format_for_llm(session_id)
+            
+            system_prompt = """You are a helpful assistant for the NORMAN Suspect List Exchange platform. 
+Provide helpful, concise responses about environmental chemistry, chemical databases, and suspect screening. 
+If you don't know something specific, suggest checking the NORMAN website."""
+            
+            if history_context:
+                user_prompt = f"""Previous conversation:
+{history_context}
+
+Current question: {user_message}"""
+            else:
+                user_prompt = user_message
+            
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a helpful assistant for the NORMAN Suspect List Exchange platform. "
-                            "Provide helpful, concise responses about environmental chemistry, "
-                            "chemical databases, and suspect screening. "
-                            "If you don't know something specific, suggest checking the NORMAN website."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": user_message
-                    }
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.7,
                 max_tokens=400
             )
             
             answer = response.choices[0].message.content.strip()
+            
+            # ✅ Store in memory
+            memory.add_exchange(
+                session_id,
+                user_message,
+                answer,
+                tier=4
+            )
             
             # Calculate cost
             input_tokens = response.usage.prompt_tokens
@@ -328,7 +572,6 @@ def chatbot_api(request):
             llm_time = time.time() - llm_start
             total_time = time.time() - request_start
             
-            # ✅ Mark as success
             tier_attempts[-1]['status'] = 'success'
             tier_attempts[-1]['message'] = 'Generated response'
             
@@ -341,9 +584,9 @@ def chatbot_api(request):
                 'tier_name': 'AI Assistant',
                 'can_retry': False,
                 'next_tier': None,
-                'tier_attempts': tier_attempts,  # ✅ Send progress
+                'tier_attempts': tier_attempts,
                 'timing': {
-                    'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
+                    'faq_ms': faq_time * 1000 if start_tier <= 1 else 0,
                     'llm_ms': llm_time * 1000,
                     'total_ms': total_time * 1000
                 },
@@ -355,7 +598,6 @@ def chatbot_api(request):
             })
             
         except Exception as e:
-            # ✅ Mark as error
             tier_attempts[-1]['status'] = 'error'
             tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
             
@@ -379,9 +621,9 @@ def chatbot_api(request):
                 'tier_name': 'Error',
                 'can_retry': False,
                 'next_tier': None,
-                'tier_attempts': tier_attempts,  # ✅ Send progress
+                'tier_attempts': tier_attempts,
                 'timing': {
-                    'faq_ms': faq_time * 1000 if skip_tier < 1 else 0,
+                    'faq_ms': faq_time * 1000 if start_tier <= 1 else 0,
                     'total_ms': total_time * 1000
                 },
                 'cost': {
@@ -397,6 +639,119 @@ def chatbot_api(request):
         import traceback
         traceback.print_exc()
         return JsonResponse({'error': 'Error processing message'}, status=500)
+
+
+# ============================================================
+# HELPER FUNCTION: FORMAT SQL RESULTS
+# ============================================================
+
+def format_all_sql_results(results: list, main_term: str, synonyms: list) -> str:
+    """
+    Format ALL SQL results for follow-up display (NO TRUNCATION)
+    
+    Args:
+        results: List of result dicts from SQL query
+        main_term: Main search term
+        synonyms: List of synonym terms
+        
+    Returns:
+        Formatted markdown string with ALL results
+    """
+    
+    if not results:
+        return f"No results found for **{main_term}**."
+    
+    # Separate by priority if available
+    exact_matches = []
+    synonym_matches = []
+    
+    for result in results:
+        priority = result.get('match_priority', 10)
+        
+        if priority <= 2:  # Exact or starts with user term
+            exact_matches.append(result)
+        else:
+            synonym_matches.append(result)
+    
+    # Build answer
+    answer_parts = []
+    
+    # Header
+    total = len(results)
+    if synonyms:
+        answer_parts.append(
+            f"📋 **All {total} results for '{main_term}'**\n"
+            f"(including synonyms: {', '.join(synonyms[:5])})"
+        )
+    else:
+        answer_parts.append(f"📋 **All {total} results for '{main_term}'**")
+    
+    answer_parts.append("")  # Blank line
+    
+    # ============================================================
+    # EXACT MATCHES - SHOW ALL (NO LIMIT)
+    # ============================================================
+    if exact_matches:
+        answer_parts.append(f"**✓ Exact matches ({len(exact_matches)}):**")
+        answer_parts.append("")
+        
+        for i, r in enumerate(exact_matches, 1):
+            name = r.get('name', 'N/A')
+            cas = r.get('cas', 'N/A')
+            mass = r.get('mass_num', 'N/A')
+            
+            answer_parts.append(f"{i}. **{name}**")
+            
+            # Add details on same line if available
+            details = []
+            if cas and cas not in ['N/A', 'None', None]:
+                details.append(f"CAS: {cas}")
+            if mass and mass not in ['N/A', 'None', None]:
+                details.append(f"Mass: {mass} Da")
+            
+            if details:
+                answer_parts.append(f"   • {' | '.join(details)}")
+    
+    # ============================================================
+    # SYNONYM/RELATED MATCHES - SHOW ALL (NO LIMIT)
+    # ============================================================
+    if synonym_matches:
+        if exact_matches:
+            answer_parts.append("")  # Separator between sections
+        
+        answer_parts.append(f"**~ Related compounds ({len(synonym_matches)}):**")
+        answer_parts.append("")
+        
+        for i, r in enumerate(synonym_matches, 1):
+            name = r.get('name', 'N/A')
+            cas = r.get('cas', 'N/A')
+            mass = r.get('mass_num', 'N/A')
+            
+            answer_parts.append(f"{i}. {name}")
+            
+            # Add details
+            details = []
+            if cas and cas not in ['N/A', 'None', None]:
+                details.append(f"CAS: {cas}")
+            if mass and mass not in ['N/A', 'None', None]:
+                details.append(f"Mass: {mass} Da")
+            
+            if details:
+                answer_parts.append(f"   • {' | '.join(details)}")
+    
+    # ============================================================
+    # FOOTER
+    # ============================================================
+    answer_parts.append("")
+    answer_parts.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    answer_parts.append(f"**Total: {total} compounds**")
+    
+    return "\n".join(answer_parts)
+
+
+# ============================================================
+# EXISTING HELPER FUNCTIONS
+# ============================================================
 
 def get_categories_api():
     """Return FAQ categories with icons from CSV"""
