@@ -25,7 +25,7 @@ class ConversationMemory:
         self.conversations[session_id].append(exchange)
         
         # Keep only last 4
-        self.conversations[session_id] = self.conversations[session_id][-4:]
+        self.conversations[session_id] = self.conversations[session_id][-2:]
     
     def get_history(self, session_id: str) -> List[Dict]:
         """Get conversation history"""

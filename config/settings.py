@@ -120,3 +120,7 @@ FAQ_CSV_PATH = os.path.join(BASE_DIR, 'chatbot', 'data', 'chatbot_faq.csv')
 
 # Cache directory
 CACHE_DIR = os.path.join(BASE_DIR, 'cache')
+
+# Session expires when browser closes
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_SAVE_EVERY_REQUEST = True

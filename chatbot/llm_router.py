@@ -1,9 +1,5 @@
-"""
-LLM Router - Decides which tier to use based on question + history
-Enhanced with follow-up detection and context awareness
-"""
-
 import os
+import json
 from openai import OpenAI
 
 class LLMRouter:
@@ -35,6 +31,28 @@ class LLMRouter:
             print(f"🔄 Quick follow-up detected: {followup_check['reasoning']}")
             return followup_check
         
+
+
+        # ============================================
+        # STEP 1.5: Check topic similarity
+        # ============================================
+        if history_context:
+            # Extract last question from history
+            history_lines = history_context.split('\n')
+            last_q = None
+            for line in reversed(history_lines):
+                if line.startswith('Q'):
+                    last_q = line.split(':', 1)[1].strip() if ':' in line else None
+                    break
+            
+            if last_q:
+                is_similar = self._check_topic_similarity(question, last_q)
+                if not is_similar:
+                    print(f"🔄 New topic detected (not similar to: '{last_q[:30]}...')")
+                    # Treat as new question, don't consider history heavily
+
+
+
         # ============================================
         # STEP 2: Use LLM for complex routing
         # ============================================
@@ -48,19 +66,34 @@ class LLMRouter:
                         "role": "system",
                         "content": """You are a routing assistant for a chemical database chatbot.
 
-Analyze the question and conversation history to decide:
+Analyze if the NEW question is truly a follow-up or a COMPLETELY NEW TOPIC.
 
-1. Is this a FOLLOW-UP question? (references previous conversation, asks for "more", "show all", etc.)
-2. Which tier should handle it?
+⚠️ CRITICAL: Most questions are NEW topics, not follow-ups!
+
+A question is ONLY a follow-up if it:
+- Uses pronouns referring to previous answer ("them", "those", "it")
+- Asks for expansion ("more details", "show all", "continue")
+- Clarifies previous question ("I meant X", "specifically Y")
+- References specific results ("the first one", "number 3")
+
+A question is NOT a follow-up if it:
+- Introduces new chemical names or topics
+- Asks "what is X" or "tell me about Y"
+- Changes the subject entirely
+- Is a complete, standalone question
+
+Examples:
+- "What is PFAS?" → NEW question (Tier 4)
+- "Tell me about pesticides" → NEW question (Tier 3)
+- "Show all" → Follow-up (Tier 0)
+- "What about the first result?" → Follow-up (Tier 0)
 
 Tiers:
-- Tier 0: FOLLOW-UP (use previous context/results)
-- Tier 1: FAQ (platform questions, how-to guides)
-- Tier 2: PDF Documents (technical documentation, methodologies)
-- Tier 3: Chemical Database (searching/counting compounds, finding chemicals)
-- Tier 4: AI Assistant (complex analysis, comparisons, explanations)
-
-IMPORTANT: If question says "more", "show all", "expand", "continue", "tell me more", "all of them", etc. → Tier 0 (FOLLOW-UP)
+- Tier 0: FOLLOW-UP (only if explicitly continuing previous answer)
+- Tier 1: FAQ (platform/website questions)
+- Tier 2: PDF Documents (technical documentation)
+- Tier 3: Chemical Database (search/count compounds)
+- Tier 4: AI Assistant (explanations, definitions, comparisons)
 
 Respond with JSON:
 {
@@ -79,7 +112,7 @@ Respond with JSON:
                 max_tokens=100
             )
             
-            import json
+            
             result = json.loads(response.choices[0].message.content)
             
             tier = result.get('tier', 1)
@@ -173,8 +206,9 @@ Respond with JSON:
                     'reasoning': f'Clarification: "{pattern}"'
                 }
         
-        # Pattern 4: Reference to previous (pronouns)
-        if question_lower in ['them', 'those', 'these', 'it', 'that']:
+        # Pattern 4: Reference to previous (ONLY standalone pronouns)
+        # Don't trigger for "What is it?" or "Tell me about that"
+        if question_lower in ['them', 'those', 'these'] and len(question.split()) <= 2:
             return {
                 'tier': 0,
                 'is_followup': True,
@@ -205,6 +239,35 @@ Respond with JSON:
             'reasoning': None
         }
     
+
+    def _check_topic_similarity(self, new_question: str, last_question: str) -> bool:
+        """
+        Check if new question is semantically similar to last question
+        
+        Returns:
+            True if similar (potential follow-up), False if different topic
+        """
+        
+        # Simple keyword-based similarity check
+        new_words = set(new_question.lower().split())
+        last_words = set(last_question.lower().split())
+        
+        # Remove common words
+        stop_words = {'the', 'a', 'an', 'is', 'are', 'what', 'how', 'many', 'do', 'we', 'have', 'tell', 'me', 'about'}
+        new_words -= stop_words
+        last_words -= stop_words
+        
+        # Calculate overlap
+        overlap = new_words & last_words
+        
+        # If less than 30% overlap, it's a new topic
+        if len(new_words) == 0:
+            return True  # Short question, assume related
+        
+        similarity = len(overlap) / len(new_words)
+        
+        return similarity > 0.3  # 30% threshold
+
     def _build_routing_prompt(self, question: str, history: str) -> str:
         """Build routing prompt with context"""
         
