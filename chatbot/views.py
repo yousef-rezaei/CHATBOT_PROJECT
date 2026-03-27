@@ -10,7 +10,8 @@ from .faq_handler import get_faq_handler
 from .rag.pdf_rag_handler import get_pdf_rag_handler 
 from .sql.sql_agent import get_sql_agent
 from .memory_manager import get_memory_manager  
-from .llm_router import get_llm_router  
+from .llm_router import get_llm_router
+from .logger import ChatbotLogger  # ← NEW: Import logger
 
 # FAQ CSV path
 FAQ_CSV_PATH = os.path.join(os.path.dirname(__file__), 'faq', 'data', 'chatbot_faq.csv')
@@ -20,7 +21,10 @@ FAQ_CSV_PATH = os.path.join(os.path.dirname(__file__), 'faq', 'data', 'chatbot_f
 def home(request):
     """Render the home page with chatbot widget"""
     return render(request, 'chatbot/index.html', {})
-
+@ensure_csrf_cookie
+def analytics_dashboard(request):
+    """Render the analytics dashboard"""
+    return render(request, 'chatbot/analytics_dashboard.html', {})
 
 @require_http_methods(["GET", "POST"])
 def chatbot_api(request):
@@ -47,6 +51,13 @@ def chatbot_api(request):
     faq_time = 0
     tier_attempts = []
     
+    # ============================================================
+    # NEW: Initialize logger
+    # ============================================================
+    user_ip = request.META.get('REMOTE_ADDR')
+    user_agent = request.META.get('HTTP_USER_AGENT', '')
+    logger = None
+    
     try:
         # ============================================================
         # PARSE REQUEST
@@ -70,6 +81,11 @@ def chatbot_api(request):
             request.session.create()
         session_id = request.session.session_key
         
+        # ============================================================
+        # NEW: Create logger with session
+        # ============================================================
+        logger = ChatbotLogger(session_id, user_ip, user_agent)
+        
         memory = get_memory_manager()
         has_history = memory.has_history(session_id)
         
@@ -79,6 +95,11 @@ def chatbot_api(request):
         print(f"🔘 FAQ Button: {is_faq_button}")
         print(f"👎 Skip Tier: {skip_tier}")
         print(f"{'='*60}")
+        
+        # ============================================================
+        # NEW: Log query
+        # ============================================================
+        logger.log_query(user_message, len(memory.get_history(session_id)), is_faq_button, skip_tier)
         
         # ============================================================
         # ROUTING DECISION
@@ -91,15 +112,24 @@ def chatbot_api(request):
             start_tier = skip_tier + 1
             print(f"👎 Negative feedback → Starting from Tier {start_tier} (sequential)")
             
+            # NEW: Log routing
+            logger.log_routing('negative_feedback', tier=start_tier)
+            
         elif is_faq_button:
             # ✅ CASE 2: FAQ button clicked - go directly to FAQ (no LLM)
             start_tier = 1
             print(f"🔘 FAQ button → Direct to FAQ Tier 1 (no LLM router)")
             
+            # NEW: Log routing
+            logger.log_routing('faq_button', tier=1, is_followup=False)
+            
         elif not has_history:
             # ✅ CASE 3: First question - use sequential tiers (no LLM)
             start_tier = 1
             print(f"🆕 First question → Sequential tiers (no LLM router)")
+            
+            # NEW: Log routing
+            logger.log_routing('first_question', tier=1, is_followup=False)
             
         else:
             # ✅ CASE 4: Has history - use LLM router
@@ -115,13 +145,24 @@ def chatbot_api(request):
                 if routing.get('is_followup'):
                     print(f"🔄 Follow-up detected: {routing.get('reasoning')}")
                     start_tier = 0  # Special marker for follow-up
+                    
+                    # NEW: Log follow-up
+                    logger.log_followup('llm_router_detected', routing.get('reasoning', ''))
+                    logger.log_routing('llm_router', tier=0, is_followup=True, reasoning=routing.get('reasoning'))
                 else:
                     start_tier = routing.get('tier', 1)
                     print(f"✅ LLM router recommended: Tier {start_tier}")
+                    
+                    # NEW: Log routing
+                    logger.log_routing('llm_router', tier=start_tier, is_followup=False, reasoning=routing.get('reasoning'))
                 
             except Exception as e:
                 print(f"⚠️ LLM router error: {e}, defaulting to Tier 1")
                 start_tier = 1
+                
+                # NEW: Log error
+                if logger:
+                    logger.log_error(0, f"LLM router error: {str(e)}")
         
         # ============================================================
         # 🎯 EXPLICIT DATABASE INTENT OVERRIDE (FIXED!)
@@ -154,12 +195,18 @@ def chatbot_api(request):
             print(f"   ✅ Forcing Tier 3 (SQL) for database search")
             start_tier = 3  # Force SQL tier
             
+            # NEW: Log override
+            logger.log_override(matched_keywords, forced_tier=3)
+            
         elif is_followup_style and start_tier != 0:
             # "show all" detected but NOT a follow-up by LLM router
             # This means it's a new query, so force SQL
             print(f"🎯 OVERRIDE: 'Show all' style query detected (not a follow-up)")
             print(f"   ✅ Forcing Tier 3 (SQL) for database search")
             start_tier = 3
+            
+            # NEW: Log override
+            logger.log_override(followup_keywords, forced_tier=3)
         
         # If start_tier == 0 (follow-up), do NOT override - let it proceed to follow-up handler
         
@@ -168,6 +215,9 @@ def chatbot_api(request):
         # ============================================================
         if start_tier == 0:  # Follow-up detected and NOT overridden
             print(f"🔄 Processing follow-up request...")
+            
+            # NEW: Log follow-up processing
+            logger.log_followup('processing', 'Retrieving from memory')
             
             last_exchange = memory.get_last_exchange(session_id)
             
@@ -182,12 +232,24 @@ def chatbot_api(request):
                 if last_tier == 3 and 'results' in metadata:
                     print(f"   ✅ Retrieving SQL results from memory")
                     
+                    # NEW: Start and complete tier 0
+                    logger.start_tier(0, 'Follow-up')
+                    
                     results = metadata['results']
                     main_term = metadata.get('main_term', 'compounds')
                     synonyms = metadata.get('synonyms', [])
                     
                     # Format ALL stored results
                     answer = format_all_sql_results(results, main_term, synonyms)
+                    
+                    # NEW: Complete tier
+                    logger.complete_tier(
+                        tier=0,
+                        status='success',
+                        result_count=len(results),
+                        tier_name='Follow-up',
+                        response_type='followup_sql'
+                    )
                     
                     # Store this follow-up in memory
                     memory.add_exchange(
@@ -199,6 +261,11 @@ def chatbot_api(request):
                     )
                     
                     total_time = time.time() - request_start
+                    
+                    # NEW: Save to database
+                    if logger:
+                        bot_message_id = logger.save(user_message, answer)
+                        print(f"💾 Saved to database (message_id: {bot_message_id})")
                     
                     return JsonResponse({
                         'response': answer,
@@ -221,6 +288,9 @@ def chatbot_api(request):
                 else:
                     print(f"   ℹ️ Follow-up to tier {last_tier}, using LLM with context")
                     
+                    # NEW: Start tier
+                    logger.start_tier(0, 'Follow-up')
+                    
                     # Use LLM with full context
                     from openai import OpenAI
                     client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -238,9 +308,7 @@ def chatbot_api(request):
                                 "role": "user",
                                 "content": f"""Previous conversation:
 {history_context}
-
 Follow-up question: {user_message}
-
 Answer based on the context above."""
                             }
                         ],
@@ -249,6 +317,20 @@ Answer based on the context above."""
                     )
                     
                     answer = response.choices[0].message.content.strip()
+                    
+                    # Calculate cost
+                    input_tokens = response.usage.prompt_tokens
+                    output_tokens = response.usage.completion_tokens
+                    cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 1000
+                    
+                    # NEW: Complete tier
+                    logger.complete_tier(
+                        tier=0,
+                        status='success',
+                        cost=cost,
+                        tier_name='Follow-up',
+                        response_type='followup_llm'
+                    )
                     
                     # Store in memory
                     memory.add_exchange(
@@ -259,12 +341,12 @@ Answer based on the context above."""
                         metadata={'type': 'followup', 'parent_tier': last_tier}
                     )
                     
-                    # Calculate cost
-                    input_tokens = response.usage.prompt_tokens
-                    output_tokens = response.usage.completion_tokens
-                    cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 1000
-                    
                     total_time = time.time() - request_start
+                    
+                    # NEW: Save to database
+                    if logger:
+                        bot_message_id = logger.save(user_message, answer)
+                        print(f"💾 Saved to database (message_id: {bot_message_id})")
                     
                     return JsonResponse({
                         'response': answer,
@@ -300,6 +382,9 @@ Answer based on the context above."""
                 'icon': '🔍'
             })
             
+            # NEW: Start tier timing
+            logger.start_tier(1, 'FAQ')
+            
             faq_start = time.time()
             faq_handler = get_faq_handler(FAQ_CSV_PATH)
             
@@ -308,6 +393,16 @@ Answer based on the context above."""
                 faq_time = time.time() - faq_start
                 
                 if faq_result['found']:
+                    # NEW: Complete tier
+                    logger.complete_tier(
+                        tier=1,
+                        status='success',
+                        similarity=faq_result.get('similarity'),
+                        result_count=1,
+                        tier_name='FAQ',
+                        response_type='faq'
+                    )
+                    
                     # ✅ Store in memory
                     memory.add_exchange(
                         session_id,
@@ -322,6 +417,11 @@ Answer based on the context above."""
                     tier_attempts[-1]['message'] = 'Found in FAQ'
                     
                     print(f"✅ TIER 1 (FAQ): Match found (similarity: {faq_result['similarity']:.3f})")
+                    
+                    # NEW: Save to database
+                    if logger:
+                        bot_message_id = logger.save(user_message, faq_result['answer'])
+                        print(f"💾 Saved to database (message_id: {bot_message_id})")
                     
                     return JsonResponse({
                         'response': faq_result['answer'],
@@ -343,6 +443,13 @@ Answer based on the context above."""
                         'timestamp': datetime.now().isoformat()
                     })
                 else:
+                    # NEW: Complete tier
+                    logger.complete_tier(
+                        tier=1,
+                        status='not_found',
+                        similarity=faq_result.get('similarity', 0)
+                    )
+                    
                     tier_attempts[-1]['status'] = 'not_found'
                     tier_attempts[-1]['message'] = 'Not found in FAQ'
                     
@@ -362,6 +469,9 @@ Answer based on the context above."""
             
             print(f"📚 Trying TIER 2: PDF RAG...")
             
+            # NEW: Start tier timing
+            logger.start_tier(2, 'PDF RAG')
+            
             try:
                 rag_start = time.time()
                 rag_handler = get_pdf_rag_handler(use_llm=True)
@@ -370,6 +480,17 @@ Answer based on the context above."""
                 rag_time = time.time() - rag_start
                 
                 if rag_result['found']:
+                    # NEW: Complete tier
+                    logger.complete_tier(
+                        tier=2,
+                        status='success',
+                        similarity=rag_result.get('top_similarity'),
+                        result_count=len(rag_result.get('sources', [])),
+                        cost=rag_result['cost']['total_cost'],
+                        tier_name='PDF RAG',
+                        response_type='pdf_rag'
+                    )
+                    
                     # ✅ Store in memory
                     memory.add_exchange(
                         session_id,
@@ -384,6 +505,11 @@ Answer based on the context above."""
                     tier_attempts[-1]['message'] = 'Found in documents'
                     
                     print(f"✅ TIER 2 (PDF RAG): Answer generated (similarity: {rag_result.get('top_similarity', 0):.3f})")
+                    
+                    # NEW: Save to database
+                    if logger:
+                        bot_message_id = logger.save(user_message, rag_result['answer'])
+                        print(f"💾 Saved to database (message_id: {bot_message_id})")
                     
                     return JsonResponse({
                         'response': rag_result['answer'],
@@ -410,12 +536,23 @@ Answer based on the context above."""
                         'timestamp': datetime.now().isoformat()
                     })
                 else:
+                    # NEW: Complete tier
+                    logger.complete_tier(
+                        tier=2,
+                        status='not_found',
+                        similarity=rag_result.get('top_similarity', 0)
+                    )
+                    
                     tier_attempts[-1]['status'] = 'not_found'
                     tier_attempts[-1]['message'] = 'Not found in documents'
                     
                     print(f"⏭️ TIER 2 (PDF RAG): No match (best: {rag_result.get('top_similarity', 0):.3f})")
                     
             except Exception as e:
+                # NEW: Log error
+                logger.log_error(2, str(e))
+                logger.complete_tier(tier=2, status='error')
+                
                 tier_attempts[-1]['status'] = 'error'
                 tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
                 
@@ -435,6 +572,9 @@ Answer based on the context above."""
             
             print(f"🗄️ Trying TIER 3: SQL Agent...")
             
+            # NEW: Start tier timing
+            logger.start_tier(3, 'SQL Agent')
+            
             try:
                 sql_start = time.time()
                 sql_agent = get_sql_agent()
@@ -446,6 +586,19 @@ Answer based on the context above."""
                     has_results = sql_result.get('result_count', 0) > 0
                     
                     if has_results:
+                        # NEW: Complete tier
+                        logger.complete_tier(
+                            tier=3,
+                            status='success',
+                            result_count=sql_result.get('result_count'),
+                            sql_query=sql_result.get('sql_query'),
+                            main_term=sql_result.get('main_term'),
+                            synonyms=sql_result.get('synonyms'),
+                            cost=sql_result['cost']['total'],
+                            tier_name='SQL Agent',
+                            response_type='sql_agent'
+                        )
+                        
                         # ✅ Store in memory WITH results metadata
                         memory.add_exchange(
                             session_id,
@@ -466,6 +619,11 @@ Answer based on the context above."""
                         tier_attempts[-1]['message'] = f'Found {sql_result.get("result_count", 0)} results'
                         
                         print(f"✅ TIER 3 (SQL): {sql_result.get('result_count', 0)} results found")
+                        
+                        # NEW: Save to database
+                        if logger:
+                            bot_message_id = logger.save(user_message, sql_result['answer'])
+                            print(f"💾 Saved to database (message_id: {bot_message_id})")
                         
                         return JsonResponse({
                             'response': sql_result['answer'],
@@ -493,17 +651,27 @@ Answer based on the context above."""
                             'timestamp': datetime.now().isoformat()
                         })
                     else:
+                        # NEW: Complete tier
+                        logger.complete_tier(tier=3, status='not_found')
+                        
                         tier_attempts[-1]['status'] = 'not_found'
                         tier_attempts[-1]['message'] = 'Query not relevant for database'
                         
                         print(f"⏭️ TIER 3 (SQL): No results returned")
                 else:
+                    # NEW: Complete tier
+                    logger.complete_tier(tier=3, status='not_found')
+                    
                     tier_attempts[-1]['status'] = 'not_found'
                     tier_attempts[-1]['message'] = 'Invalid result'
                     
                     print(f"⏭️ TIER 3 (SQL): Invalid result")
                     
             except Exception as e:
+                # NEW: Log error
+                logger.log_error(3, str(e))
+                logger.complete_tier(tier=3, status='error')
+                
                 tier_attempts[-1]['status'] = 'error'
                 tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
                 
@@ -522,6 +690,9 @@ Answer based on the context above."""
         
         print(f"🤖 Trying TIER 4: LLM Fallback...")
         
+        # NEW: Start tier timing
+        logger.start_tier(4, 'LLM Fallback')
+        
         try:
             from openai import OpenAI
             
@@ -539,7 +710,6 @@ If you don't know something specific, suggest checking the NORMAN website."""
             if history_context:
                 user_prompt = f"""Previous conversation:
 {history_context}
-
 Current question: {user_message}"""
             else:
                 user_prompt = user_message
@@ -569,6 +739,15 @@ Current question: {user_message}"""
             output_tokens = response.usage.completion_tokens
             cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 1000
             
+            # NEW: Complete tier
+            logger.complete_tier(
+                tier=4,
+                status='success',
+                cost=cost,
+                tier_name='LLM Fallback',
+                response_type='llm_fallback'
+            )
+            
             llm_time = time.time() - llm_start
             total_time = time.time() - request_start
             
@@ -576,6 +755,11 @@ Current question: {user_message}"""
             tier_attempts[-1]['message'] = 'Generated response'
             
             print(f"✅ TIER 4 (LLM): Response generated (cost: ${cost:.6f})")
+            
+            # NEW: Save to database
+            if logger:
+                bot_message_id = logger.save(user_message, answer)
+                print(f"💾 Saved to database (message_id: {bot_message_id})")
             
             return JsonResponse({
                 'response': answer,
@@ -598,6 +782,11 @@ Current question: {user_message}"""
             })
             
         except Exception as e:
+            # NEW: Log error
+            if logger:
+                logger.log_error(4, str(e))
+                logger.complete_tier(tier=4, status='error')
+            
             tier_attempts[-1]['status'] = 'error'
             tier_attempts[-1]['message'] = f'Error: {str(e)[:50]}'
             
@@ -608,14 +797,21 @@ Current question: {user_message}"""
             # ============================================================
             total_time = time.time() - request_start
             
+            fallback_response = (
+                "I'm having trouble answering that question. Please try:\n\n"
+                "• **Rephrasing your question** - Be more specific\n"
+                "• **Browsing FAQ categories** - Find related topics\n"
+                "• **Checking spelling** - Make sure terms are correct\n\n"
+                "Or ask me something else!"
+            )
+            
+            # NEW: Save error to database
+            if logger:
+                bot_message_id = logger.save(user_message, fallback_response)
+                print(f"💾 Saved error to database (message_id: {bot_message_id})")
+            
             return JsonResponse({
-                'response': (
-                    "I'm having trouble answering that question. Please try:\n\n"
-                    "• **Rephrasing your question** - Be more specific\n"
-                    "• **Browsing FAQ categories** - Find related topics\n"
-                    "• **Checking spelling** - Make sure terms are correct\n\n"
-                    "Or ask me something else!"
-                ),
+                'response': fallback_response,
                 'type': 'error',
                 'tier': 0,
                 'tier_name': 'Error',
@@ -635,6 +831,10 @@ Current question: {user_message}"""
     except json.JSONDecodeError:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
     except Exception as exc:
+        # NEW: Log exception
+        if logger:
+            logger.log_error(0, str(exc), {'traceback': str(exc)})
+        
         print(f"❌ Error in chatbot_api: {exc}")
         import traceback
         traceback.print_exc()
@@ -644,7 +844,6 @@ Current question: {user_message}"""
 # ============================================================
 # HELPER FUNCTION: FORMAT SQL RESULTS
 # ============================================================
-
 def format_all_sql_results(results: list, main_term: str, synonyms: list) -> str:
     """
     Format ALL SQL results for follow-up display (NO TRUNCATION)
@@ -752,7 +951,6 @@ def format_all_sql_results(results: list, main_term: str, synonyms: list) -> str
 # ============================================================
 # EXISTING HELPER FUNCTIONS
 # ============================================================
-
 def get_categories_api():
     """Return FAQ categories with icons from CSV"""
     faq_handler = get_faq_handler(FAQ_CSV_PATH)
@@ -866,8 +1064,14 @@ def chatbot_feedback(request):
         print(f"   Type: {feedback_data['type']}")
         print(f"{'='*60}\n")
         
-        # TODO: Store in database
-        # Feedback.objects.create(**feedback_data)
+        # TODO: Update message feedback in database
+        # from .models import ChatMessage
+        # message_id = data.get('message_id')
+        # if message_id:
+        #     ChatMessage.objects.filter(id=message_id).update(
+        #         helpful=feedback_data['helpful'],
+        #         feedback_timestamp=datetime.now()
+        #     )
         
         return JsonResponse({
             'status': 'success',

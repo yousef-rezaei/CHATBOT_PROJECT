@@ -331,7 +331,8 @@
 
 /* User message bubble */
 .message.user .message-bubble {
-background: linear-gradient(135deg, #66ea6a 0%, #764ba2 100%);
+
+    background: linear-gradient(135deg, var(--primary-green) 0%, var(--primary-dark) 100%);
     color: white;
     border-radius: 18px 18px 4px 18px;
     padding: 12px 16px;

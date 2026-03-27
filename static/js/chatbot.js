@@ -276,7 +276,30 @@ function handleQuestionClick(question) {
         }
         
         messagesContainer.appendChild(messageDiv);
+        // messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    // ============================================================
+    //  Scroll to TOP of bot message instead of bottom
+    // ============================================================
+    if (!isUser) {
+        // For bot messages: scroll to show the START of the message
+        requestAnimationFrame(() => {
+            // Get the position of the message we just added
+            const messageRect = messageDiv.getBoundingClientRect();
+            const containerRect = messagesContainer.getBoundingClientRect();
+            
+            // Calculate how much to scroll to put the message at the top
+            const scrollOffset = messageDiv.offsetTop - messagesContainer.offsetTop;
+            
+            // Smooth scroll to the top of the new message
+            messagesContainer.scrollTo({
+                top: scrollOffset,
+                behavior: 'smooth'
+            });
+        });
+    } else {
+        // For user messages: scroll to bottom as usual
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
     }
     
     // ========================================

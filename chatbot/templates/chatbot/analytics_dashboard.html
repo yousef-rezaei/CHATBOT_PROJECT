@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot Analytics Dashboard</title>
+    <style>
+        /* ============================================================
+           FONTS - Distinctive Typography
+           ============================================================ */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+        /* ============================================================
+           CSS VARIABLES - Ocean Tech Theme
+           ============================================================ */
+        :root {
+            /* Colors - Deep Ocean Palette */
+            --bg-primary: #0a0e27;
+            --bg-secondary: #151b3d;
+            --bg-tertiary: #1e2847;
+            --bg-card: #1a2238;
+            
+            --accent-cyan: #00d4ff;
+            --accent-blue: #0077ff;
+            --accent-purple: #7b2ff7;
+            --accent-green: #00ffa3;
+            --accent-yellow: #ffd60a;
+            --accent-red: #ff006e;
+            
+            --text-primary: #ffffff;
+            --text-secondary: #b8c5d6;
+            --text-muted: #6b7a8f;
+            
+            --border: rgba(255, 255, 255, 0.1);
+            --glow: rgba(0, 212, 255, 0.3);
+            
+            /* Typography */
+            --font-main: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            
+            /* Spacing */
+            --space-xs: 0.5rem;
+            --space-sm: 1rem;
+            --space-md: 1.5rem;
+            --space-lg: 2rem;
+            --space-xl: 3rem;
+            
+            /* Animation */
+            --transition-fast: 0.15s ease;
+            --transition-base: 0.3s ease;
+            --transition-slow: 0.5s ease;
+        }
+
+        /* ============================================================
+           RESET & BASE
+           ============================================================ */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Animated background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(123, 47, 247, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(0, 212, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 20%, rgba(0, 119, 255, 0.1) 0%, transparent 50%);
+            animation: bgShift 20s ease infinite;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        @keyframes bgShift {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(5%, -5%) rotate(5deg); }
+            66% { transform: translate(-5%, 5%) rotate(-5deg); }
+        }
+
+        /* ============================================================
+           LAYOUT
+           ============================================================ */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--space-xl) var(--space-md);
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ============================================================
+           HEADER
+           ============================================================ */
+        .header {
+            margin-bottom: var(--space-xl);
+            animation: slideDown 0.6s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header h1 {
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 700;
+            margin-bottom: var(--space-xs);
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 1.125rem;
+            font-weight: 300;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: var(--space-sm);
+            margin-top: var(--space-md);
+            flex-wrap: wrap;
+        }
+
+        /* ============================================================
+           BUTTONS
+           ============================================================ */
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 0.5rem;
+            font-family: var(--font-main);
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition-base);
+            position: relative;
+            overflow: hidden;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left var(--transition-base);
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+            color: white;
+            box-shadow: 0 4px 20px rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 30px rgba(0, 212, 255, 0.5);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-secondary);
+            border-color: var(--accent-cyan);
+        }
+
+        /* ============================================================
+           STATS GRID
+           ============================================================ */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: var(--space-md);
+            margin-bottom: var(--space-xl);
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: var(--space-md);
+            position: relative;
+            overflow: hidden;
+            transition: all var(--transition-base);
+            animation: fadeInUp 0.6s ease backwards;
+        }
+
+        .stat-card:nth-child(1) { animation-delay: 0.1s; }
+        .stat-card:nth-child(2) { animation-delay: 0.2s; }
+        .stat-card:nth-child(3) { animation-delay: 0.3s; }
+        .stat-card:nth-child(4) { animation-delay: 0.4s; }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+            opacity: 0;
+            transition: opacity var(--transition-base);
+        }
+
+        .stat-card:hover {
+            border-color: var(--accent-cyan);
+            transform: translateY(-4px);
+            box-shadow: 0 10px 40px rgba(0, 212, 255, 0.2);
+        }
+
+        .stat-card:hover::before {
+            opacity: 1;
+        }
+
+        .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: var(--space-sm);
+        }
+
+        .stat-icon.cyan { background: rgba(0, 212, 255, 0.1); color: var(--accent-cyan); }
+        .stat-icon.blue { background: rgba(0, 119, 255, 0.1); color: var(--accent-blue); }
+        .stat-icon.purple { background: rgba(123, 47, 247, 0.1); color: var(--accent-purple); }
+        .stat-icon.green { background: rgba(0, 255, 163, 0.1); color: var(--accent-green); }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+        }
+
+        .stat-change {
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        .stat-change.positive { color: var(--accent-green); }
+        .stat-change.negative { color: var(--accent-red); }
+
+        /* ============================================================
+           MAIN CONTENT GRID
+           ============================================================ */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: var(--space-md);
+            margin-bottom: var(--space-xl);
+        }
+
+        @media (max-width: 1024px) {
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ============================================================
+           CARD
+           ============================================================ */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: var(--space-md);
+            animation: fadeInUp 0.6s ease backwards;
+            animation-delay: 0.5s;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-md);
+            padding-bottom: var(--space-sm);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .card-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 2rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-cyan { 
+            background: rgba(0, 212, 255, 0.1); 
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 212, 255, 0.3);
+        }
+
+        /* ============================================================
+           SESSIONS LIST
+           ============================================================ */
+        .sessions-list {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+            max-height: 600px;
+            overflow-y: auto;
+            padding-right: var(--space-xs);
+        }
+
+        /* Custom scrollbar */
+        .sessions-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sessions-list::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+            border-radius: 3px;
+        }
+
+        .sessions-list::-webkit-scrollbar-thumb {
+            background: var(--accent-cyan);
+            border-radius: 3px;
+        }
+
+        .session-item {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 0.75rem;
+            padding: var(--space-sm);
+            cursor: pointer;
+            transition: all var(--transition-base);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .session-item:hover {
+            border-color: var(--accent-cyan);
+            transform: translateX(4px);
+            background: var(--bg-tertiary);
+        }
+
+        .session-info h4 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            margin-bottom: 0.25rem;
+        }
+
+        .session-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            gap: 1rem;
+        }
+
+        .session-stats {
+            text-align: right;
+        }
+
+        .session-messages {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--accent-cyan);
+            font-family: var(--font-mono);
+        }
+
+        .session-cost {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        /* ============================================================
+           TIER DISTRIBUTION
+           ============================================================ */
+        .tier-bars {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-sm);
+        }
+
+        .tier-bar {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .tier-bar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .tier-label {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .tier-value {
+            font-size: 0.875rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+            color: var(--text-primary);
+        }
+
+        .tier-progress {
+            height: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .tier-progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 1s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .tier-progress-fill::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            to { left: 100%; }
+        }
+
+        .tier-0 { background: linear-gradient(90deg, var(--accent-purple), var(--accent-blue)); }
+        .tier-1 { background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue)); }
+        .tier-2 { background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple)); }
+        .tier-3 { background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan)); }
+        .tier-4 { background: linear-gradient(90deg, var(--accent-yellow), var(--accent-green)); }
+
+        /* ============================================================
+           MESSAGES TABLE
+           ============================================================ */
+        .messages-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+        .messages-table thead {
+            position: sticky;
+            top: 0;
+            background: var(--bg-card);
+            z-index: 10;
+        }
+
+        .messages-table th {
+            text-align: left;
+            padding: var(--space-sm);
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            border-bottom: 2px solid var(--border);
+        }
+
+        .messages-table td {
+            padding: var(--space-sm);
+            border-bottom: 1px solid var(--border);
+            font-size: 0.875rem;
+        }
+
+        .messages-table tbody tr {
+            transition: background var(--transition-fast);
+        }
+
+        .messages-table tbody tr:hover {
+            background: var(--bg-secondary);
+        }
+
+        .tier-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 2rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .tier-badge-0 { background: rgba(123, 47, 247, 0.2); color: var(--accent-purple); }
+        .tier-badge-1 { background: rgba(0, 212, 255, 0.2); color: var(--accent-cyan); }
+        .tier-badge-2 { background: rgba(0, 119, 255, 0.2); color: var(--accent-blue); }
+        .tier-badge-3 { background: rgba(0, 255, 163, 0.2); color: var(--accent-green); }
+        .tier-badge-4 { background: rgba(255, 214, 10, 0.2); color: var(--accent-yellow); }
+
+        /* ============================================================
+           LOADING STATE
+           ============================================================ */
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-xl);
+            gap: var(--space-md);
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--bg-tertiary);
+            border-top: 3px solid var(--accent-cyan);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* ============================================================
+           EMPTY STATE
+           ============================================================ */
+        .empty-state {
+            text-align: center;
+            padding: var(--space-xl);
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: var(--space-md);
+            opacity: 0.5;
+        }
+
+        /* ============================================================
+           MODAL
+           ============================================================ */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(10, 14, 39, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: var(--space-md);
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-content {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            max-width: 900px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: var(--space-lg);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-md);
+            padding-bottom: var(--space-sm);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0.5rem;
+            transition: color var(--transition-fast);
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .console-output {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: var(--space-md);
+            font-family: var(--font-mono);
+            font-size: 0.875rem;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            color: var(--text-secondary);
+        }
+
+        /* ============================================================
+           RESPONSIVE
+           ============================================================ */
+        @media (max-width: 768px) {
+            .container {
+                padding: var(--space-md) var(--space-sm);
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .header-actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>Analytics Dashboard</h1>
+            <p>Real-time monitoring of chatbot performance and usage</p>
+            <div class="header-actions">
+                <button class="btn btn-primary" onclick="refreshData()">
+                    <span>🔄</span>
+                    <span>Refresh Data</span>
+                </button>
+                <button class="btn btn-secondary" onclick="exportData()">
+                    <span>📥</span>
+                    <span>Export CSV</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-icon cyan">💬</div>
+                <div class="stat-label">Total Sessions</div>
+                <div class="stat-value" id="totalSessions">--</div>
+                <div class="stat-change positive">+12% this week</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon blue">📨</div>
+                <div class="stat-label">Total Messages</div>
+                <div class="stat-value" id="totalMessages">--</div>
+                <div class="stat-change">All time</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon purple">⚡</div>
+                <div class="stat-label">Avg Response Time</div>
+                <div class="stat-value" id="avgResponseTime">--</div>
+                <div class="stat-change">milliseconds</div>
+            </div>
+
+            <div class="stat-card">
+                <div class="stat-icon green">💰</div>
+                <div class="stat-label">Total Cost</div>
+                <div class="stat-value" id="totalCost">$--</div>
+                <div class="stat-change">USD</div>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="content-grid">
+            <!-- Recent Sessions -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Recent Sessions</h2>
+                    <span class="card-badge badge-cyan" id="sessionCount">0 Sessions</span>
+                </div>
+                <div class="sessions-list" id="sessionsList">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <div class="loading-text">Loading sessions...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tier Distribution -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Tier Distribution</h2>
+                </div>
+                <div class="tier-bars" id="tierDistribution">
+                    <!-- Tier bars will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Messages -->
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title">Recent Messages</h2>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="messages-table">
+                    <thead>
+                        <tr>
+                            <th>Query</th>
+                            <th>Tier</th>
+                            <th>Type</th>
+                            <th>Time</th>
+                            <th>Cost</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="messagesTable">
+                        <tr>
+                            <td colspan="6">
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                    <div class="loading-text">Loading messages...</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Console Logs -->
+    <div class="modal" id="consoleModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Console Logs</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="console-output" id="consoleOutput">
+                Loading logs...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================================
+        // API BASE URL - CHANGE THIS IF NEEDED
+        // ============================================================
+        const API_BASE = window.location.origin;
+
+        // ============================================================
+        // STATE
+        // ============================================================
+        let currentStats = null;
+        let currentSessions = [];
+
+        // ============================================================
+        // INITIALIZATION
+        // ============================================================
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAllData();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(() => {
+                loadAllData();
+            }, 30000);
+        });
+
+        // ============================================================
+        // DATA LOADING
+        // ============================================================
+        async function loadAllData() {
+            await Promise.all([
+                loadStats(),
+                loadSessions(),
+                loadRecentMessages()
+            ]);
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/analytics/stats/`);
+                const data = await response.json();
+                currentStats = data;
+                
+                // Update stats cards
+                document.getElementById('totalSessions').textContent = 
+                    data.sessions.total.toLocaleString();
+                
+                document.getElementById('totalMessages').textContent = 
+                    data.messages.total.toLocaleString();
+                
+                document.getElementById('avgResponseTime').textContent = 
+                    data.messages.avg_response_time_ms.toLocaleString() + 'ms';
+                
+                document.getElementById('totalCost').textContent = 
+                    '$' + data.messages.total_cost.toFixed(4);
+                
+                // Update tier distribution
+                updateTierDistribution(data.tier_distribution);
+                
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadSessions() {
+            try {
+                const response = await fetch(`${API_BASE}/api/analytics/sessions/?per_page=20`);
+                const data = await response.json();
+                currentSessions = data.sessions;
+                
+                document.getElementById('sessionCount').textContent = 
+                    `${data.total} Sessions`;
+                
+                renderSessions(data.sessions);
+                
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+                document.getElementById('sessionsList').innerHTML = 
+                    '<div class="empty-state"><div class="empty-state-icon">⚠️</div><p>Failed to load sessions</p></div>';
+            }
+        }
+
+        async function loadRecentMessages() {
+            try {
+                // Get first session and load its messages
+                if (currentSessions.length === 0) {
+                    document.getElementById('messagesTable').innerHTML = 
+                        '<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">💬</div><p>No messages yet</p></div></td></tr>';
+                    return;
+                }
+                
+                const firstSession = currentSessions[0];
+                const response = await fetch(`${API_BASE}/api/analytics/sessions/${firstSession.session_id}/`);
+                const data = await response.json();
+                
+                renderMessages(data.messages);
+                
+            } catch (error) {
+                console.error('Error loading messages:', error);
+                document.getElementById('messagesTable').innerHTML = 
+                    '<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">⚠️</div><p>Failed to load messages</p></div></td></tr>';
+            }
+        }
+
+        // ============================================================
+        // RENDERING
+        // ============================================================
+        function renderSessions(sessions) {
+            const container = document.getElementById('sessionsList');
+            
+            if (sessions.length === 0) {
+                container.innerHTML = 
+                    '<div class="empty-state"><div class="empty-state-icon">💬</div><p>No sessions yet</p></div>';
+                return;
+            }
+            
+            container.innerHTML = sessions.map(session => `
+                <div class="session-item" onclick="loadSessionMessages('${session.session_id}')">
+                    <div class="session-info">
+                        <h4>${session.session_id.substring(0, 12)}...</h4>
+                        <div class="session-meta">
+                            <span>🕒 ${formatDate(session.started_at)}</span>
+                            <span>📍 ${session.user_ip || 'Unknown'}</span>
+                        </div>
+                    </div>
+                    <div class="session-stats">
+                        <div class="session-messages">${session.total_messages}</div>
+                        <div class="session-cost">$${session.total_cost.toFixed(4)}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderMessages(messages) {
+            const tbody = document.getElementById('messagesTable');
+            
+            // Filter bot messages only
+            const botMessages = messages.filter(m => m.type === 'bot');
+            
+            if (botMessages.length === 0) {
+                tbody.innerHTML = 
+                    '<tr><td colspan="6"><div class="empty-state"><div class="empty-state-icon">💬</div><p>No messages in this session</p></div></td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = botMessages.slice(0, 10).map(msg => {
+                // Get user message
+                const userMsg = messages.find(m => 
+                    m.type === 'user' && 
+                    new Date(m.timestamp) < new Date(msg.timestamp)
+                );
+                
+                return `
+                    <tr>
+                        <td>
+                            <div style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${userMsg ? userMsg.content : 'N/A'}
+                            </div>
+                        </td>
+                        <td>
+                            <span class="tier-badge tier-badge-${msg.tier || 0}">
+                                Tier ${msg.tier || 0}
+                            </span>
+                        </td>
+                        <td>
+                            <span style="color: var(--text-secondary); font-size: 0.75rem;">
+                                ${msg.response_type || 'N/A'}
+                            </span>
+                        </td>
+                        <td>
+                            <span style="font-family: var(--font-mono); font-size: 0.875rem;">
+                                ${msg.response_time_ms || 0}ms
+                            </span>
+                        </td>
+                        <td>
+                            <span style="font-family: var(--font-mono); color: var(--accent-cyan);">
+                                $${(msg.cost || 0).toFixed(6)}
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.75rem;" 
+                                    onclick="showConsoleLog(${msg.id})">
+                                View Logs
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateTierDistribution(tierDist) {
+            const container = document.getElementById('tierDistribution');
+            
+            const tiers = [
+                { name: 'Follow-up (Tier 0)', key: 'tier_0', color: 'tier-0' },
+                { name: 'FAQ (Tier 1)', key: 'tier_1', color: 'tier-1' },
+                { name: 'PDF RAG (Tier 2)', key: 'tier_2', color: 'tier-2' },
+                { name: 'SQL Agent (Tier 3)', key: 'tier_3', color: 'tier-3' },
+                { name: 'LLM Fallback (Tier 4)', key: 'tier_4', color: 'tier-4' }
+            ];
+            
+            const total = Object.values(tierDist).reduce((sum, val) => sum + val, 0);
+            
+            if (total === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No tier data yet</p></div>';
+                return;
+            }
+            
+            container.innerHTML = tiers.map(tier => {
+                const count = tierDist[tier.key] || 0;
+                const percentage = total > 0 ? (count / total * 100) : 0;
+                
+                return `
+                    <div class="tier-bar">
+                        <div class="tier-bar-header">
+                            <span class="tier-label">${tier.name}</span>
+                            <span class="tier-value">${count} (${percentage.toFixed(1)}%)</span>
+                        </div>
+                        <div class="tier-progress">
+                            <div class="tier-progress-fill ${tier.color}" 
+                                 style="width: ${percentage}%">
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ============================================================
+        // ACTIONS
+        // ============================================================
+        async function loadSessionMessages(sessionId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/analytics/sessions/${sessionId}/`);
+                const data = await response.json();
+                
+                renderMessages(data.messages);
+                
+                // Scroll to messages table
+                document.querySelector('.messages-table').scrollIntoView({ 
+                    behavior: 'smooth', 
+                    block: 'start' 
+                });
+                
+            } catch (error) {
+                console.error('Error loading session messages:', error);
+            }
+        }
+
+        async function showConsoleLog(messageId) {
+            const modal = document.getElementById('consoleModal');
+            const output = document.getElementById('consoleOutput');
+            
+            modal.classList.add('active');
+            output.textContent = 'Loading console logs...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/analytics/messages/${messageId}/console/`);
+                const data = await response.json();
+                
+                output.textContent = data.console_output;
+                
+            } catch (error) {
+                console.error('Error loading console log:', error);
+                output.textContent = 'Failed to load console logs.';
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('consoleModal').classList.remove('active');
+        }
+
+        // Close modal on background click
+        document.getElementById('consoleModal').addEventListener('click', (e) => {
+            if (e.target.id === 'consoleModal') {
+                closeModal();
+            }
+        });
+
+        // Close modal on ESC key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        function refreshData() {
+            loadAllData();
+            
+            // Show feedback
+            const btn = event.target.closest('.btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<span>✓</span><span>Refreshed!</span>';
+            btn.style.background = 'linear-gradient(135deg, var(--accent-green), var(--accent-cyan))';
+            
+            setTimeout(() => {
+                btn.innerHTML = originalText;
+                btn.style.background = '';
+            }, 2000);
+        }
+
+        async function exportData() {
+            try {
+                window.location.href = `${API_BASE}/api/analytics/export/?format=csv&type=messages`;
+            } catch (error) {
+                console.error('Error exporting data:', error);
+                alert('Failed to export data');
+            }
+        }
+
+        // ============================================================
+        // UTILITIES
+        // ============================================================
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+            
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            if (diffDays < 7) return `${diffDays}d ago`;
+            
+            return date.toLocaleDateString();
+        }
+    </script>
+</body>
+</html>
