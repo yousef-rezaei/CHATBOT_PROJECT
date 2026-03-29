@@ -256,7 +256,9 @@ function handleQuestionClick(question) {
         bubbleDiv.innerHTML = content
             .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
             .replace(/\n/g, '<br>')
-            .replace(/• /g, '• ');
+            .replace(/• /g, '• ')
+            .replace(/(https?:\/\/[^\s<>]+)/gi, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+
         
         // Time
         const timeDiv = document.createElement('div');

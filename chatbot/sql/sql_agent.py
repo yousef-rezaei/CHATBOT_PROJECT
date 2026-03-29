@@ -120,6 +120,7 @@ mv_compound_cards materialized view columns:
         print(f"🎯 Main term: {main_term}")
         print(f"🔄 Synonyms: {synonyms}")
         print(f"✅ Generated Smart SQL")
+        print(f"📝 SQL Query:\n{sql_query}")
         
         # ========================================
         # STEP 3: EXECUTE SQL
@@ -144,8 +145,13 @@ mv_compound_cards materialized view columns:
         # STEP 4: FORMAT RESULTS WITH RANKING INFO
         # ========================================
         format_start = time.time()
+        
+        # ✅ NEW: Pass query_type and requested_field to formatter
+        query_type = smart_result.get('query_type', 'search')
+        requested_field = smart_result.get('requested_field', None)
+        
         answer = self._format_smart_results(
-            user_message, results, main_term, synonyms
+            user_message, results, main_term, synonyms, query_type, requested_field
         )
         format_time = time.time() - format_start
         format_cost = 0.00015
@@ -238,38 +244,115 @@ mv_compound_cards materialized view columns:
 DATABASE SCHEMA:
 """ + self.schema + """
 
-YOUR TASK:
-1. Identify the main search term from user's query
-2. Find ALL synonyms, alternative names, and related terms for chemicals
-3. Generate PostgreSQL query with PRIORITY RANKING
+═══════════════════════════════════════════════════════════════
+QUERY TYPE DETECTION
+═══════════════════════════════════════════════════════════════
 
-CRITICAL RULES:
-- NEVER use COUNT(*) - ALWAYS return full compound data with SELECT *
-- Table name: mv_compound_cards
-- Use name_lc for case-insensitive search
-- LIMIT 50 results
-- Include match_priority column
-- ORDER BY match_priority ASC, name ASC
+**1️⃣ FIELD VALUE QUERY** - User asks for specific column value:
+   Patterns: "what is [FIELD] of [COMPOUND]", "[COMPOUND]'s [FIELD]", "show [FIELD] for [COMPOUND]"
+   
+**2️⃣ SEARCH QUERY** - User searches for compounds:
+   Patterns: "how many [TYPE]", "find [TYPE]", "compounds with [TERM]"
 
-RESPONSE FORMAT (JSON only):
+═══════════════════════════════════════════════════════════════
+AVAILABLE FIELDS
+═══════════════════════════════════════════════════════════════
+
+**Columns:** ns_id, cas, inchikey, dtxsid, name, name_lc, mass_num, xlogp_num, smiles, list_count, name_bucket, name_is_clean, pc_record_id, compound_id
+
+**Field Aliases:**
+- "mass", "weight" → mass_num
+- "CAS number" → cas
+- "xlogp", "logp" → xlogp_num
+- "count", "list count" → list_count
+
+⚠️ CRITICAL: list_count, mass_num, cas are FIELD NAMES, not compound names!
+
+═══════════════════════════════════════════════════════════════
+SQL GENERATION
+═══════════════════════════════════════════════════════════════
+
+**FOR FIELD VALUE QUERIES:**
+```sql
+SELECT name, [requested_field] 
+FROM mv_compound_cards 
+WHERE name_lc = LOWER('[compound]')
+LIMIT 1;
+```
+
+**FOR SEARCH QUERIES:**
+```sql
+SELECT *, 
+  CASE 
+    WHEN name_lc = '[exact_term]' THEN 1
+    WHEN name_lc LIKE '[term]%' THEN 2
+    WHEN name_lc IN ('[synonym1]', '[synonym2]') THEN 3
+    WHEN name_lc LIKE '%[term]%' THEN 5
+    [more synonyms]
+    ELSE 10
+  END AS match_priority
+FROM mv_compound_cards
+WHERE name_lc LIKE '%[term]%' OR [synonym conditions]
+ORDER BY match_priority ASC, name ASC
+LIMIT 50;
+```
+
+Rules:
+- Field queries: LIMIT 1, exact match, specific field only
+- Search queries: LIMIT 50, priority ranking, SELECT *, include synonyms
+- NEVER use COUNT(*) - always return data rows
+- Use name_lc for all comparisons
+
+═══════════════════════════════════════════════════════════════
+EXAMPLES
+═══════════════════════════════════════════════════════════════
+
+**Example 1 - Field Value:**
+User: "what is the list_count of atrazine"
 {
-  "main_term": "user's exact search term",
-  "synonyms": ["synonym1", "synonym2"],
-  "sql_query": "SELECT * with CASE for ranking",
-  "explanation": "brief explanation"
+  "query_type": "field_value",
+  "requested_field": "list_count",
+  "main_term": "atrazine",
+  "synonyms": [],
+  "sql_query": "SELECT name, list_count FROM mv_compound_cards WHERE name_lc = 'atrazine' LIMIT 1;",
+  "explanation": "Returns list_count field value for Atrazine"
 }
 
-EXAMPLE - Counting:
-User: "how many pesticides do we have"
-Response MUST return full data, not COUNT:
+**Example 2 - Field with Alias:**
+User: "show me atrazine's CAS number"
 {
+  "query_type": "field_value",
+  "requested_field": "cas",
+  "main_term": "atrazine",
+  "synonyms": [],
+  "sql_query": "SELECT name, cas FROM mv_compound_cards WHERE name_lc = 'atrazine' LIMIT 1;",
+  "explanation": "Returns CAS field for Atrazine"
+}
+
+**Example 3 - Search:**
+User: "how many pesticides do we have"
+{
+  "query_type": "search",
+  "requested_field": null,
   "main_term": "pesticide",
   "synonyms": ["insecticide", "herbicide", "fungicide"],
-  "sql_query": "SELECT *, CASE WHEN name_lc = 'pesticide' THEN 1 WHEN name_lc LIKE 'pesticide%' THEN 2 WHEN name_lc IN ('insecticide', 'herbicide') THEN 3 WHEN name_lc LIKE '%pesticide%' THEN 5 ELSE 10 END AS match_priority FROM mv_compound_cards WHERE name_lc LIKE '%pesticide%' OR name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' ORDER BY match_priority ASC LIMIT 50;",
-  "explanation": "Returns all pesticide compounds with ranking"
+  "sql_query": "SELECT *, CASE WHEN name_lc = 'pesticide' THEN 1 WHEN name_lc LIKE 'pesticide%' THEN 2 WHEN name_lc IN ('insecticide', 'herbicide', 'fungicide') THEN 3 WHEN name_lc LIKE '%pesticide%' THEN 5 WHEN name_lc LIKE '%insecticide%' THEN 6 WHEN name_lc LIKE '%herbicide%' THEN 6 WHEN name_lc LIKE '%fungicide%' THEN 6 ELSE 10 END AS match_priority FROM mv_compound_cards WHERE name_lc LIKE '%pesticide%' OR name_lc LIKE '%insecticide%' OR name_lc LIKE '%herbicide%' OR name_lc LIKE '%fungicide%' ORDER BY match_priority ASC, name ASC LIMIT 50;",
+  "explanation": "Returns all pesticides with synonyms and ranking"
 }
 
-IMPORTANT: NEVER use COUNT - always SELECT * with full compound data!
+═══════════════════════════════════════════════════════════════
+RESPONSE FORMAT
+═══════════════════════════════════════════════════════════════
+
+Return JSON only (no markdown):
+{
+  "query_type": "field_value" or "search",
+  "requested_field": "field_name" or null,
+  "main_term": "search term or compound name",
+  "synonyms": ["list of synonyms"],
+  "sql_query": "the SQL query",
+  "explanation": "brief reasoning"
+}
 """
             
             response = self.client.chat.completions.create(
@@ -349,9 +432,36 @@ IMPORTANT: NEVER use COUNT - always SELECT * with full compound data!
             return None, str(e)
     
     def _format_smart_results(self, question: str, results: list, 
-                              main_term: str, synonyms: list) -> str:
+                              main_term: str, synonyms: list,
+                              query_type: str = 'search',
+                              requested_field: str = None) -> str:
         """Format results with priority grouping"""
         try:
+            # ============================================================
+            # ✅ NEW: Handle FIELD VALUE queries
+            # ============================================================
+            if query_type == 'field_value' and requested_field and len(results) > 0:
+                result = results[0]  # Get first result
+                compound_name = result.get('name', 'Unknown')
+                field_value = result.get(requested_field, 'N/A')
+                
+                # Format nicely based on field type
+                if requested_field == 'list_count':
+                    return f"The **list_count** for **{compound_name}** is: **{field_value}**"
+                elif requested_field == 'cas':
+                    return f"The **CAS number** for **{compound_name}** is: **{field_value}**"
+                elif requested_field == 'mass_num':
+                    return f"The **molecular mass** of **{compound_name}** is: **{field_value} Da**"
+                elif requested_field == 'xlogp_num':
+                    return f"The **logP** of **{compound_name}** is: **{field_value}**"
+                elif requested_field == 'inchikey':
+                    return f"The **InChIKey** for **{compound_name}** is: `{field_value}`"
+                elif requested_field == 'smiles':
+                    return f"The **SMILES** for **{compound_name}** is: `{field_value}`"
+                else:
+                    # Generic field
+                    return f"The **{requested_field}** for **{compound_name}** is: **{field_value}**"
+            
             question_lower = question.lower()
             wants_count = any(word in question_lower for word in ['how many', 'count', 'number of'])
             
